@@ -1,0 +1,15 @@
+{
+  "name": "sprite-tab",
+  "version": "1.0.1",
+  "description": "Stash plugin that adds a tab displaying sprite sheets",
+  "private": true,
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}

@@ -5,8 +5,8 @@
     const STORAGE_KEY = 'stash_plugin_sprite_settings';
     const PLUGIN_ID = 'SpriteTab';
     const SPRITE_WIDTH_GUESS = 160;
-    const DEFAULT_PREVIEW_WIDTH = 480; // Default size of the magnified pop-up in pixels
-    const DEFAULT_SPRITE_SIZE = 160; // Default sprite thumbnail width in pixels
+    const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
+    const DEFAULT_SPRITE_SIZE = 50; // Default sprite thumbnail width in pixels
     const DEFAULTS = { cols: 4, showTime: true, compact: false, autoScroll: true };
 
     // Plugin settings cache
@@ -225,24 +225,33 @@
         scrollArea.style.cssText = 'position: relative; width: 100%; padding-bottom: 50px;';
 
         const grid = document.createElement('div');
+        grid.id = 'stash-sprite-grid';
         const s = getSettings();
         grid.style.cssText = `display: grid; grid-template-columns: repeat(${s.cols}, 1fr); gap: ${s.compact ? '0' : '5px'}; padding-right: 5px;`;
 
         const cells = [];
         let totalSpritesCount = 0;
 
+        // Re-query DOM each time to handle React re-renders that may detach elements
         const updateUI = (key) => {
             const ns = getSettings();
-            if (key === 'cols') grid.style.gridTemplateColumns = `repeat(${ns.cols}, 1fr)`;
+            const currentGrid = document.getElementById('stash-sprite-grid');
+            if (!currentGrid) return;
+
+            if (key === 'cols') {
+                currentGrid.style.gridTemplateColumns = `repeat(${ns.cols}, 1fr)`;
+            }
             if (key === 'compact') {
-                grid.style.gap = ns.compact ? '0px' : '5px';
-                cells.forEach(c => {
-                    c.element.style.border = ns.compact ? 'none' : '1px solid #333';
-                    c.element.style.borderRadius = ns.compact ? '0' : '4px';
+                currentGrid.style.gap = ns.compact ? '0px' : '5px';
+                currentGrid.querySelectorAll('.sprite-cell').forEach(cell => {
+                    cell.style.border = ns.compact ? 'none' : '1px solid #333';
+                    cell.style.borderRadius = ns.compact ? '0' : '4px';
                 });
             }
             if (key === 'showTime') {
-                grid.querySelectorAll('.sprite-timestamp').forEach(el => el.style.display = ns.showTime ? 'block' : 'none');
+                currentGrid.querySelectorAll('.sprite-timestamp').forEach(el => {
+                    el.style.display = ns.showTime ? 'block' : 'none';
+                });
             }
         };
 
