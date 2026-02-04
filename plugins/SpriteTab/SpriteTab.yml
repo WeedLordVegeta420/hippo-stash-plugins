@@ -1,7 +1,20 @@
 name: Sprite Tab
 description: Adds a tab to the scene page displaying the full sprite sheet.
-version: 1.0
+version: 1.0.1
 url: https://github.com/hippochapel/hippo-stash-plugins/tree/main/plugins/SpriteTab
 ui:
   javascript:
     - sprites.js
+settings:
+  sprite_size:
+    displayName: Sprite Size (pixels)
+    description: Width of each sprite thumbnail in the grid
+    type: NUMBER
+  tooltip_enabled:
+    displayName: Tooltip Enabled
+    description: Show magnified preview when hovering over sprites
+    type: BOOLEAN
+  tooltip_width:
+    displayName: Tooltip Preview Width
+    description: Width of the tooltip preview popup in pixels
+    type: NUMBER
