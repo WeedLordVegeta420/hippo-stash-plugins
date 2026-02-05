@@ -14,6 +14,7 @@ All commands run from `plugins/SpriteTab/`:
 npm test              # Run Jest test suite
 npm test:watch        # Run Jest in watch mode
 npm test:coverage     # Run tests with coverage report
+STASH_PLUGIN_DIR=/path/to/stash/plugins/SpriteTab npm run sync  # Sync plugin to Stash
 ```
 
 Build the plugin index (from repo root):

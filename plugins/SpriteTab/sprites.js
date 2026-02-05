@@ -7,13 +7,17 @@
     const SPRITE_WIDTH_GUESS = 160;
     const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
     const DEFAULT_SPRITE_SIZE = 50; // Default sprite thumbnail width in pixels
-    const DEFAULTS = { cols: 4, showTime: true, compact: false, autoScroll: true };
+    const DEFAULTS = { cols: 4 };
 
     // Plugin settings cache
     let pluginSettings = {
         sprite_size: DEFAULT_SPRITE_SIZE,
         tooltip_enabled: true,
-        tooltip_width: DEFAULT_PREVIEW_WIDTH
+        tooltip_width: DEFAULT_PREVIEW_WIDTH,
+        show_timestamps: true,
+        compact_view: false,
+        auto_scroll: true,
+        grid_columns: null
     };
 
     // Initialization state to prevent race conditions
@@ -119,6 +123,10 @@
                 pluginSettings.sprite_size = settings.sprite_size ?? DEFAULT_SPRITE_SIZE;
                 pluginSettings.tooltip_enabled = settings.tooltip_enabled ?? true;
                 pluginSettings.tooltip_width = settings.tooltip_width ?? DEFAULT_PREVIEW_WIDTH;
+                pluginSettings.show_timestamps = settings.show_timestamps ?? true;
+                pluginSettings.compact_view = settings.compact_view ?? false;
+                pluginSettings.auto_scroll = settings.auto_scroll ?? true;
+                pluginSettings.grid_columns = settings.grid_columns ?? null;
             }
         } catch (e) {
             console.warn('SpriteTab: Could not load plugin settings, using defaults', e);
@@ -139,37 +147,31 @@
 
     // --- UI RENDERER ---
     function renderControls(container, updateCallback) {
+        // Hide toolbar if grid_columns is configured in plugin settings
+        if (pluginSettings.grid_columns) return null;
+
         const settings = getSettings();
         const bar = document.createElement('div');
 
         // Sticky positioning to keep controls visible
         bar.style.cssText = `
-            padding: 10px;
+            padding: 5px 10px;
             display: flex;
-            flex-wrap: wrap;
             align-items: center;
-            gap: 15px;
             background: rgba(30, 30, 30, 0.95);
             border-bottom: 1px solid #444;
-            margin-bottom: 15px;
-            border-radius: 0 0 5px 5px;
-            font-size: 14px;
             position: sticky;
             top: 0;
             z-index: 100;
             backdrop-filter: blur(5px);
         `;
 
-        const colWrapper = document.createElement('div');
-        colWrapper.style.cssText = 'display: flex; align-items: center; gap: 5px; flex-grow: 1;';
-        colWrapper.innerHTML = `<span>Size:</span>`;
-
         const slider = document.createElement('input');
         slider.type = 'range';
         slider.min = '1';
         slider.max = '12';
         slider.value = 13 - settings.cols;
-        slider.style.cssText = 'cursor: pointer; flex-grow: 1; max-width: 200px;';
+        slider.style.cssText = 'cursor: pointer; width: 100%;';
 
         slider.oninput = (e) => {
             const newVal = parseInt(e.target.value);
@@ -178,26 +180,8 @@
             updateCallback('cols');
         };
 
-        colWrapper.appendChild(slider);
-        bar.appendChild(colWrapper);
+        bar.appendChild(slider);
 
-        const createToggle = (label, key) => {
-            const labelEl = document.createElement('label');
-            labelEl.style.cssText = 'display: flex; align-items: center; gap: 5px; cursor: pointer; margin: 0;';
-            const check = document.createElement('input');
-            check.type = 'checkbox'; check.checked = settings[key];
-            check.onchange = (e) => {
-                saveSettings({ [key]: e.target.checked });
-                updateCallback(key);
-            };
-            labelEl.appendChild(check);
-            labelEl.appendChild(document.createTextNode(label));
-            return labelEl;
-        };
-
-        bar.appendChild(createToggle('Timestamps', 'showTime'));
-        bar.appendChild(createToggle('Compact', 'compact'));
-        bar.appendChild(createToggle('Auto-Scroll', 'autoScroll'));
         return bar;
     }
 
@@ -226,8 +210,8 @@
 
         const grid = document.createElement('div');
         grid.id = 'stash-sprite-grid';
-        const s = getSettings();
-        grid.style.cssText = `display: grid; grid-template-columns: repeat(${s.cols}, 1fr); gap: ${s.compact ? '0' : '5px'}; padding-right: 5px;`;
+        const cols = pluginSettings.grid_columns || getSettings().cols;
+        grid.style.cssText = `display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: ${pluginSettings.compact_view ? '0' : '5px'}; padding-right: 5px;`;
 
         const cells = [];
         let totalSpritesCount = 0;
@@ -241,21 +225,10 @@
             if (key === 'cols') {
                 currentGrid.style.gridTemplateColumns = `repeat(${ns.cols}, 1fr)`;
             }
-            if (key === 'compact') {
-                currentGrid.style.gap = ns.compact ? '0px' : '5px';
-                currentGrid.querySelectorAll('.sprite-cell').forEach(cell => {
-                    cell.style.border = ns.compact ? 'none' : '1px solid #333';
-                    cell.style.borderRadius = ns.compact ? '0' : '4px';
-                });
-            }
-            if (key === 'showTime') {
-                currentGrid.querySelectorAll('.sprite-timestamp').forEach(el => {
-                    el.style.display = ns.showTime ? 'block' : 'none';
-                });
-            }
         };
 
-        mainContainer.appendChild(renderControls(mainContainer, updateUI));
+        const controls = renderControls(mainContainer, updateUI);
+        if (controls) mainContainer.appendChild(controls);
         mainContainer.appendChild(scrollArea);
 
         const img = new Image();
@@ -272,8 +245,8 @@
                 const cell = document.createElement('div');
                 cell.className = 'sprite-cell';
                 cell.style.cssText = `width: 100%; aspect-ratio: 16/9; background-image: url('${sceneData.paths.sprite}'); background-repeat: no-repeat; cursor: pointer; position: relative;`;
-                cell.style.border = getSettings().compact ? 'none' : '1px solid #333';
-                cell.style.borderRadius = getSettings().compact ? '0' : '4px';
+                cell.style.border = pluginSettings.compact_view ? 'none' : '1px solid #333';
+                cell.style.borderRadius = pluginSettings.compact_view ? '0' : '4px';
 
                 // Set background mapping
                 cell.style.backgroundSize = `${sourceCols * 100}%`;
@@ -285,7 +258,7 @@
                 const time = (i / totalSpritesCount) * sceneData.duration;
                 const timeStr = formatTime(time);
 
-                if (getSettings().showTime) {
+                if (pluginSettings.show_timestamps) {
                     const ts = document.createElement('span');
                     ts.className = 'sprite-timestamp';
                     ts.innerText = timeStr;
@@ -361,7 +334,7 @@
                 cell.onmouseenter = (e) => {
                     // Ignore synthetic mouse events after touch
                     if (Date.now() - lastTouchTime < 500) return;
-                    if(!getSettings().compact) cell.style.borderColor = '#fff';
+                    if(!pluginSettings.compact_view) cell.style.borderColor = '#fff';
                     showTooltip(e.clientX, e.clientY);
                 };
 
@@ -372,7 +345,7 @@
                 };
 
                 cell.onmouseleave = () => {
-                    if(!getSettings().compact) cell.style.border = '1px solid #333';
+                    if(!pluginSettings.compact_view) cell.style.border = '1px solid #333';
                     hideTooltip();
                 };
 
@@ -395,7 +368,7 @@
                             isLongPress = true;
                             // Prevent default to stop any remaining native behaviors
                             showTooltip(touch.clientX, touch.clientY);
-                            if(!getSettings().compact) cell.style.borderColor = '#fff';
+                            if(!pluginSettings.compact_view) cell.style.borderColor = '#fff';
                         }, 500);
                     }
                 };
@@ -419,7 +392,7 @@
                         // Hide tooltip if it was shown
                         if (isLongPress) {
                             hideTooltip();
-                            if(!getSettings().compact) cell.style.border = '1px solid #333';
+                            if(!pluginSettings.compact_view) cell.style.border = '1px solid #333';
                             isLongPress = false;
                         }
                     }
@@ -443,7 +416,7 @@
 
                     // Hide tooltip
                     hideTooltip();
-                    if(!getSettings().compact) cell.style.border = '1px solid #333';
+                    if(!pluginSettings.compact_view) cell.style.border = '1px solid #333';
 
                     // If it was a long press, don't seek
                     if (isLongPress) {
@@ -474,7 +447,7 @@
                         touchTimer = null;
                     }
                     hideTooltip();
-                    if(!getSettings().compact) cell.style.border = '1px solid #333';
+                    if(!pluginSettings.compact_view) cell.style.border = '1px solid #333';
                     isLongPress = false;
                     isScrolling = false;
                     touchStartPos = null;
@@ -511,7 +484,7 @@
                     cells[safeIdx].element.style.boxShadow = 'inset 0 0 0 2px #00BFFF';
                     cells[safeIdx].element.style.zIndex = '1';
 
-                    if (getSettings().autoScroll) {
+                    if (pluginSettings.auto_scroll) {
                         cells[safeIdx].element.scrollIntoView({
                             behavior: 'smooth',
                             block: 'center',
@@ -586,7 +559,7 @@
 
                     tabContent.classList.add('stash-plugin-sprites-active');
 
-                    if (getSettings().autoScroll) {
+                    if (pluginSettings.auto_scroll) {
                         const activeCell = tabPane.querySelector('.sprite-cell[style*="box-shadow"]');
                         if (activeCell) activeCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
