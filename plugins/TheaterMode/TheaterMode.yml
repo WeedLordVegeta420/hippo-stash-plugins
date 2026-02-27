@@ -1,0 +1,7 @@
+name: Theater Mode
+description: Adds a theater mode button to the video player that expands the video to the full page width.
+version: "1.0"
+url: https://github.com/hippochapel/hippo-stash-plugins/tree/main/plugins/TheaterMode
+ui:
+  javascript:
+    - theater.js
