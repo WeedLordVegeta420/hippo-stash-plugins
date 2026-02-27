@@ -6,12 +6,10 @@
     const PLUGIN_ID = 'SpriteTab';
     const SPRITE_WIDTH_GUESS = 160;
     const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
-    const DEFAULT_SPRITE_SIZE = 50; // Default sprite thumbnail width in pixels
     const DEFAULTS = { cols: 4 };
 
     // Plugin settings cache
     let pluginSettings = {
-        sprite_size: DEFAULT_SPRITE_SIZE,
         tooltip_enabled: true,
         tooltip_width: DEFAULT_PREVIEW_WIDTH,
         show_timestamps: true,
@@ -22,6 +20,9 @@
 
     // Initialization state to prevent race conditions
     let isInitializing = false;
+
+    // Store scene data for rebuilding on settings change
+    let currentSceneData = null;
 
     // --- HELPERS ---
     function getSettings() {
@@ -90,9 +91,8 @@
                 border-radius: 4px;
                 font-weight: bold;
             }
-            /* Sprite cell size based on plugin settings */
+            /* Sprite cell styles */
             .sprite-cell {
-                min-width: ${pluginSettings.sprite_size}px;
                 /* Prevent native long-press behaviors on mobile */
                 -webkit-touch-callout: none;
                 -webkit-user-select: none;
@@ -120,7 +120,6 @@
             const allPlugins = data?.configuration?.plugins;
             if (allPlugins && allPlugins[PLUGIN_ID]) {
                 const settings = allPlugins[PLUGIN_ID];
-                pluginSettings.sprite_size = settings.sprite_size ?? DEFAULT_SPRITE_SIZE;
                 pluginSettings.tooltip_enabled = settings.tooltip_enabled ?? true;
                 pluginSettings.tooltip_width = settings.tooltip_width ?? DEFAULT_PREVIEW_WIDTH;
                 pluginSettings.show_timestamps = settings.show_timestamps ?? true;
@@ -541,12 +540,32 @@
             tabContent.appendChild(tabPane);
 
             const data = await getSceneData(sceneId);
+            currentSceneData = data;
             const grid = renderSpriteGrid(data);
             if (grid) tabPane.appendChild(grid);
             else tabPane.innerHTML = '<div style="padding:20px;">No sprites available.</div>';
 
+            // Helper to rebuild the panel with fresh settings
+            const rebuildPanel = async () => {
+                const oldSettings = { ...pluginSettings };
+                await loadPluginSettings();
+
+                // Check if any settings changed
+                const settingsChanged = Object.keys(pluginSettings).some(
+                    key => pluginSettings[key] !== oldSettings[key]
+                );
+
+                if (settingsChanged && currentSceneData) {
+                    injectStyles();
+                    tabPane.innerHTML = '';
+                    const newGrid = renderSpriteGrid(currentSceneData);
+                    if (newGrid) tabPane.appendChild(newGrid);
+                    else tabPane.innerHTML = '<div style="padding:20px;">No sprites available.</div>';
+                }
+            };
+
             // Event Handling
-            navTabs.addEventListener('click', (e) => {
+            navTabs.addEventListener('click', async (e) => {
                 const link = e.target.closest('.nav-link');
                 if (!link) return;
 
@@ -558,6 +577,9 @@
                     link.classList.add('active');
 
                     tabContent.classList.add('stash-plugin-sprites-active');
+
+                    // Reload settings in case they changed
+                    await rebuildPanel();
 
                     if (pluginSettings.auto_scroll) {
                         const activeCell = tabPane.querySelector('.sprite-cell[style*="box-shadow"]');

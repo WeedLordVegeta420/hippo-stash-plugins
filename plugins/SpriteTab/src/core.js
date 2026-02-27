@@ -6,9 +6,8 @@
 const STORAGE_KEY = 'stash_plugin_sprite_settings';
 const PLUGIN_ID = 'SpriteTab';
 const DEFAULT_PREVIEW_WIDTH = 300;
-const DEFAULT_SPRITE_SIZE = 50;
 const SPRITE_WIDTH_GUESS = 160;
-const DEFAULTS = { cols: 4, showTime: true, compact: false, autoScroll: true };
+const DEFAULTS = { cols: 0, showTime: true, compact: false, autoScroll: true };
 
 /**
  * Format seconds into human-readable time string
@@ -174,7 +173,6 @@ function calculateSpriteTime(index, totalSprites, duration) {
  */
 function parsePluginSettings(data, pluginId = PLUGIN_ID) {
     const defaults = {
-        sprite_size: DEFAULT_SPRITE_SIZE,
         tooltip_enabled: true,
         tooltip_width: DEFAULT_PREVIEW_WIDTH
     };
@@ -186,7 +184,6 @@ function parsePluginSettings(data, pluginId = PLUGIN_ID) {
 
     const settings = allPlugins[pluginId];
     return {
-        sprite_size: settings.sprite_size ?? defaults.sprite_size,
         tooltip_enabled: settings.tooltip_enabled ?? defaults.tooltip_enabled,
         tooltip_width: settings.tooltip_width ?? defaults.tooltip_width
     };
@@ -224,7 +221,6 @@ if (typeof module !== 'undefined' && module.exports) {
         STORAGE_KEY,
         PLUGIN_ID,
         DEFAULT_PREVIEW_WIDTH,
-        DEFAULT_SPRITE_SIZE,
         SPRITE_WIDTH_GUESS,
         DEFAULTS,
         formatTime,

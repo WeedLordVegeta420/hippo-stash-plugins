@@ -443,7 +443,6 @@ describe('GraphQL Mock Integration', () => {
                 configuration: {
                     plugins: {
                         SpriteTab: {
-                            sprite_size: 200,
                             tooltip_enabled: true,
                             tooltip_width: 500
                         }
@@ -465,7 +464,7 @@ describe('GraphQL Mock Integration', () => {
         });
         const data = await response.json();
 
-        expect(data.data.configuration.plugins.SpriteTab.sprite_size).toBe(200);
+        expect(data.data.configuration.plugins.SpriteTab.tooltip_width).toBe(500);
     });
 
     it('should handle failed fetch gracefully', async () => {

@@ -371,7 +371,6 @@ describe('calculateSpriteTime', () => {
 describe('parsePluginSettings', () => {
     it('returns defaults for null data', () => {
         const result = parsePluginSettings(null);
-        expect(result.sprite_size).toBe(50);
         expect(result.tooltip_enabled).toBe(true);
         expect(result.tooltip_width).toBe(300);
     });
@@ -379,7 +378,7 @@ describe('parsePluginSettings', () => {
     it('returns defaults for missing plugin', () => {
         const data = { configuration: { plugins: {} } };
         const result = parsePluginSettings(data);
-        expect(result.sprite_size).toBe(50);
+        expect(result.tooltip_enabled).toBe(true);
     });
 
     it('parses plugin settings correctly', () => {
@@ -387,7 +386,6 @@ describe('parsePluginSettings', () => {
             configuration: {
                 plugins: {
                     SpriteTab: {
-                        sprite_size: 200,
                         tooltip_enabled: false,
                         tooltip_width: 600
                     }
@@ -395,7 +393,6 @@ describe('parsePluginSettings', () => {
             }
         };
         const result = parsePluginSettings(data);
-        expect(result.sprite_size).toBe(200);
         expect(result.tooltip_enabled).toBe(false);
         expect(result.tooltip_width).toBe(600);
     });
@@ -405,15 +402,14 @@ describe('parsePluginSettings', () => {
             configuration: {
                 plugins: {
                     SpriteTab: {
-                        sprite_size: 200
-                        // tooltip_enabled and tooltip_width missing
+                        tooltip_enabled: false
+                        // tooltip_width missing
                     }
                 }
             }
         };
         const result = parsePluginSettings(data);
-        expect(result.sprite_size).toBe(200);
-        expect(result.tooltip_enabled).toBe(true);
+        expect(result.tooltip_enabled).toBe(false);
         expect(result.tooltip_width).toBe(300);
     });
 
@@ -421,12 +417,12 @@ describe('parsePluginSettings', () => {
         const data = {
             configuration: {
                 plugins: {
-                    CustomPlugin: { sprite_size: 300 }
+                    CustomPlugin: { tooltip_width: 400 }
                 }
             }
         };
         const result = parsePluginSettings(data, 'CustomPlugin');
-        expect(result.sprite_size).toBe(300);
+        expect(result.tooltip_width).toBe(400);
     });
 });
 

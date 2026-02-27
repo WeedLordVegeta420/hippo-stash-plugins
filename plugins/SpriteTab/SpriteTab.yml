@@ -6,10 +6,6 @@ ui:
   javascript:
     - sprites.js
 settings:
-  sprite_size:
-    displayName: Sprite Size (pixels)
-    description: Width of each sprite thumbnail in the grid
-    type: NUMBER
   tooltip_enabled:
     displayName: Tooltip Enabled
     description: Show magnified preview when hovering over sprites
