@@ -34,7 +34,10 @@ buildPlugin()
     zipfile=$(realpath "$outdir/$plugin_id.zip")
     
     pushd "$dir" > /dev/null
-    zip -r "$zipfile" . > /dev/null
+    find . -maxdepth 1 -type f \
+        \( -name "*.yml" -o -name "*.js" -o -name "*.css" -o -name "*.py" -o -name "*.sh" \) \
+        ! -name "*.config.js" \
+        | zip "$zipfile" -@ > /dev/null
     popd > /dev/null
 
     name=$(grep "^name:" "$f" | head -n 1 | cut -d' ' -f2- | sed -e 's/\r//' -e 's/^"\(.*\)"$/\1/')
