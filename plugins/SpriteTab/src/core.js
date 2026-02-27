@@ -206,6 +206,18 @@ function parseSceneData(data) {
 }
 
 /**
+ * Check if the current viewport is using a mobile (phone-sized) layout.
+ * On mobile, the sprite panel flows with the page rather than having its own
+ * scroll container, so auto-scroll during playback would hijack the page scroll.
+ * @param {function} matchMediaFn - matchMedia function (injectable for testing)
+ * @returns {boolean} True if viewport width is ≤767px
+ */
+function isMobileLayout(matchMediaFn = typeof window !== 'undefined' ? window.matchMedia.bind(window) : null) {
+    if (!matchMediaFn) return false;
+    return matchMediaFn('(max-width: 767px)').matches;
+}
+
+/**
  * Extract scene ID from URL path
  * @param {string} pathname - URL pathname
  * @returns {string|null} Scene ID or null if not a scene page
@@ -229,6 +241,7 @@ if (typeof module !== 'undefined' && module.exports) {
         calculateTooltipPosition,
         isScrollGesture,
         isSyntheticMouseEvent,
+        isMobileLayout,
         calculateSpriteGrid,
         calculateSpritePosition,
         calculateSpriteTime,

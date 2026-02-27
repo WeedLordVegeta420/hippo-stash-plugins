@@ -6,7 +6,8 @@
 const {
     calculateTooltipPosition,
     isScrollGesture,
-    isSyntheticMouseEvent
+    isSyntheticMouseEvent,
+    isMobileLayout
 } = require('../src/core');
 
 describe('Touch and Mouse Event Integration', () => {
@@ -429,6 +430,209 @@ describe('Video Player Integration', () => {
     it('should handle missing video element', () => {
         const found = document.querySelector('video.vjs-tech') || document.querySelector('video');
         expect(found).toBeNull();
+    });
+});
+
+describe('Shared touch time guard', () => {
+    // Bug: lastTouchTime was declared inside the per-cell for-loop, so touching
+    // cell A only raised the guard for cell A. Synthetic mouseenter on cell B
+    // (fired by the browser after finger lift) would see lastTouchTime=0 and
+    // re-show the tooltip. Fix: one shared lastTouchTime for all cells.
+    beforeEach(() => {
+        document.body.innerHTML = '';
+    });
+
+    it('should block mouse events on all cells after a touch on any single cell', () => {
+        let lastTouchTime = 0; // shared — the correct implementation
+        const mockShowTooltip = jest.fn();
+
+        const cells = Array.from({ length: 3 }, () => {
+            const cell = document.createElement('div');
+            cell.className = 'sprite-cell';
+            cell.addEventListener('mouseenter', () => {
+                if (!isSyntheticMouseEvent(lastTouchTime, Date.now())) {
+                    mockShowTooltip();
+                }
+            });
+            document.body.appendChild(cell);
+            return cell;
+        });
+
+        // Touch fires on cell 0, updating the shared timestamp
+        lastTouchTime = Date.now();
+
+        // Synthetic mouseenter on the other cells should be blocked
+        cells[1].dispatchEvent(new MouseEvent('mouseenter'));
+        cells[2].dispatchEvent(new MouseEvent('mouseenter'));
+
+        expect(mockShowTooltip).not.toHaveBeenCalled();
+    });
+
+    it('should allow mouse events on all cells once the guard window expires', () => {
+        let lastTouchTime = Date.now() - 600; // well outside the 500ms window
+        const mockShowTooltip = jest.fn();
+
+        const cells = Array.from({ length: 3 }, () => {
+            const cell = document.createElement('div');
+            cell.className = 'sprite-cell';
+            cell.addEventListener('mouseenter', () => {
+                if (!isSyntheticMouseEvent(lastTouchTime, Date.now())) {
+                    mockShowTooltip();
+                }
+            });
+            document.body.appendChild(cell);
+            return cell;
+        });
+
+        cells.forEach(cell => cell.dispatchEvent(new MouseEvent('mouseenter')));
+
+        expect(mockShowTooltip).toHaveBeenCalledTimes(3);
+    });
+});
+
+describe('Long press drag behavior', () => {
+    // Bug: ontouchmove ran scroll detection unconditionally, so any finger
+    // movement > 10px during a long press set isScrolling=true and hid the
+    // tooltip. Fix: when isLongPress is active, return early before the scroll
+    // detection block, so dragging across cells keeps the tooltip alive.
+
+    it('should not trigger scroll detection while long press is active', () => {
+        let isScrolling = false;
+        let isLongPress = true;
+        const touchStartPos = { x: 100, y: 100 };
+
+        const handleTouchMove = (currentPos) => {
+            if (isLongPress) return; // early return — no scroll detection during drag
+            if (isScrollGesture(touchStartPos, currentPos)) {
+                isScrolling = true;
+            }
+        };
+
+        // Large movement that would otherwise trigger scroll detection
+        handleTouchMove({ x: 250, y: 250 });
+
+        expect(isScrolling).toBe(false);
+    });
+
+    it('should still detect scrolling before long press activates', () => {
+        let isScrolling = false;
+        let isLongPress = false;
+        const touchStartPos = { x: 100, y: 100 };
+
+        const handleTouchMove = (currentPos) => {
+            if (isLongPress) return;
+            if (isScrollGesture(touchStartPos, currentPos)) {
+                isScrolling = true;
+            }
+        };
+
+        handleTouchMove({ x: 100, y: 150 }); // 50px vertical movement
+
+        expect(isScrolling).toBe(true);
+    });
+
+    it('should show hovered cell sprite data when finger moves to a different cell', () => {
+        const previewBox = document.createElement('div');
+        previewBox.id = 'stash-sprite-preview';
+        const timeDisplay = document.createElement('div');
+        timeDisplay.className = 'preview-time';
+        previewBox.appendChild(timeDisplay);
+        document.body.appendChild(previewBox);
+
+        // Two cells with distinct sprite positions and timestamps
+        const createCell = (bgPos, timeStr) => {
+            const cell = document.createElement('div');
+            cell.className = 'sprite-cell';
+            cell.style.backgroundPosition = bgPos;
+            if (timeStr) {
+                const ts = document.createElement('span');
+                ts.className = 'sprite-timestamp';
+                ts.innerText = timeStr;
+                cell.appendChild(ts);
+            }
+            document.body.appendChild(cell);
+            return cell;
+        };
+
+        createCell('0% 0%', '0:00');       // cell A — where long press started
+        const cellB = createCell('50% 50%', '1:30'); // cell B — where finger moved to
+
+        // Simulate what ontouchmove does when elementFromPoint returns cellB:
+        // read cellB's backgroundPosition and timestamp, pass as overrides
+        const tsEl = cellB.querySelector('.sprite-timestamp');
+        const bgPosOverride = cellB.style.backgroundPosition;
+        const timeStrOverride = tsEl ? tsEl.innerText : '';
+
+        previewBox.style.backgroundPosition = bgPosOverride;
+        timeDisplay.innerText = timeStrOverride;
+
+        expect(previewBox.style.backgroundPosition).toBe('50% 50%');
+        expect(timeDisplay.innerText).toBe('1:30');
+    });
+});
+
+describe('Auto-scroll layout awareness', () => {
+    // Bug: auto-scroll called scrollIntoView on the active sprite cell during
+    // playback, which on mobile (where the panel has no own scroll container)
+    // hijacked the page scroll. Fix: suppress sprite scroll on mobile layout;
+    // instead scroll to the video player when the user taps a sprite.
+
+    it('should suppress sprite scroll-into-view during playback on mobile layout', () => {
+        const mockScrollIntoView = jest.fn();
+        const element = { scrollIntoView: mockScrollIntoView };
+        const mobileMatchMedia = jest.fn(() => ({ matches: true }));
+
+        const autoScroll = true;
+        const spritesVisible = true;
+        if (autoScroll && spritesVisible && !isMobileLayout(mobileMatchMedia)) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+
+        expect(mockScrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it('should allow sprite scroll-into-view during playback on desktop layout', () => {
+        const mockScrollIntoView = jest.fn();
+        const element = { scrollIntoView: mockScrollIntoView };
+        const desktopMatchMedia = jest.fn(() => ({ matches: false }));
+
+        const autoScroll = true;
+        const spritesVisible = true;
+        if (autoScroll && spritesVisible && !isMobileLayout(desktopMatchMedia)) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+
+        expect(mockScrollIntoView).toHaveBeenCalledWith({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'nearest'
+        });
+    });
+
+    it('should scroll to video player after tap on mobile layout', () => {
+        const mockScrollIntoView = jest.fn();
+        const player = { scrollIntoView: mockScrollIntoView };
+        const mobileMatchMedia = jest.fn(() => ({ matches: true }));
+
+        const autoScroll = true;
+        if (autoScroll && isMobileLayout(mobileMatchMedia)) {
+            player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        expect(mockScrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    });
+
+    it('should not scroll to video player after tap on desktop layout', () => {
+        const mockScrollIntoView = jest.fn();
+        const player = { scrollIntoView: mockScrollIntoView };
+        const desktopMatchMedia = jest.fn(() => ({ matches: false }));
+
+        const autoScroll = true;
+        if (autoScroll && isMobileLayout(desktopMatchMedia)) {
+            player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        expect(mockScrollIntoView).not.toHaveBeenCalled();
     });
 });
 

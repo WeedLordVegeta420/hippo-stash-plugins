@@ -11,6 +11,7 @@ const {
     calculateTooltipPosition,
     isScrollGesture,
     isSyntheticMouseEvent,
+    isMobileLayout,
     calculateSpriteGrid,
     calculateSpritePosition,
     calculateSpriteTime,
@@ -462,6 +463,28 @@ describe('parseSceneData', () => {
         expect(result.id).toBe('123');
         expect(result.duration).toBe(0);
         expect(result.spritePath).toBeNull();
+    });
+});
+
+describe('isMobileLayout', () => {
+    it('returns true when viewport matches phone-sized breakpoint', () => {
+        const mockMatchMedia = jest.fn(() => ({ matches: true }));
+        expect(isMobileLayout(mockMatchMedia)).toBe(true);
+    });
+
+    it('returns false when viewport does not match phone-sized breakpoint', () => {
+        const mockMatchMedia = jest.fn(() => ({ matches: false }));
+        expect(isMobileLayout(mockMatchMedia)).toBe(false);
+    });
+
+    it('queries the correct breakpoint', () => {
+        const mockMatchMedia = jest.fn(() => ({ matches: false }));
+        isMobileLayout(mockMatchMedia);
+        expect(mockMatchMedia).toHaveBeenCalledWith('(max-width: 767px)');
+    });
+
+    it('returns false when matchMedia is unavailable', () => {
+        expect(isMobileLayout(null)).toBe(false);
     });
 });
 

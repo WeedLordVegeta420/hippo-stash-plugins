@@ -54,6 +54,10 @@
         return document.querySelector('video.vjs-tech') || document.querySelector('video');
     }
 
+    function isMobileLayout() {
+        return window.matchMedia('(max-width: 767px)').matches;
+    }
+
     // --- INJECT CUSTOM STYLES ---
     function injectStyles() {
         // Remove existing styles to allow for settings updates
@@ -248,6 +252,9 @@
             const sourceRows = Math.round(sourceH / singleH);
             totalSpritesCount = sourceCols * sourceRows;
 
+            // Shared across all cells so any touch blocks synthetic mouse events on all cells
+            let lastTouchTime = 0;
+
             for (let i = 0; i < totalSpritesCount; i++) {
                 const cell = document.createElement('div');
                 cell.className = 'sprite-cell';
@@ -274,16 +281,13 @@
                 }
 
                 // --- TOOLTIP HELPER FUNCTIONS ---
-                // Track recent touch to prevent mouse events from re-showing tooltip
-                let lastTouchTime = 0;
-
-                const showTooltip = (clientX, clientY) => {
+                const showTooltip = (clientX, clientY, bgPosOverride, timeStrOverride) => {
                     if (!pluginSettings.tooltip_enabled) return;
 
                     previewBox.style.backgroundImage = `url('${sceneData.paths.sprite}')`;
                     previewBox.style.backgroundSize = `${sourceCols * 100}%`;
-                    previewBox.style.backgroundPosition = bgPos;
-                    previewTimeDisplay.innerText = timeStr;
+                    previewBox.style.backgroundPosition = bgPosOverride !== undefined ? bgPosOverride : bgPos;
+                    previewTimeDisplay.innerText = timeStrOverride !== undefined ? timeStrOverride : timeStr;
 
                     // Calculate tooltip dimensions (use fixed aspect ratio since we know it)
                     const tooltipWidth = pluginSettings.tooltip_width;
@@ -384,30 +388,33 @@
                     if (!touchStartPos) return;
 
                     const touch = e.touches[0];
+
+                    if (isLongPress) {
+                        // Long press active: prevent scrolling and update tooltip
+                        // to show whichever sprite is currently under the finger
+                        e.preventDefault();
+                        const hoveredEl = document.elementFromPoint(touch.clientX, touch.clientY);
+                        const hoveredCell = hoveredEl && hoveredEl.closest('.sprite-cell');
+                        if (hoveredCell && hoveredCell !== cell) {
+                            const tsEl = hoveredCell.querySelector('.sprite-timestamp');
+                            showTooltip(touch.clientX, touch.clientY,
+                                hoveredCell.style.backgroundPosition,
+                                tsEl ? tsEl.innerText : '');
+                        } else {
+                            showTooltip(touch.clientX, touch.clientY);
+                        }
+                        return;
+                    }
+
+                    // Long press not yet active: detect scrolling to cancel the timer
                     const dx = Math.abs(touch.clientX - touchStartPos.x);
                     const dy = Math.abs(touch.clientY - touchStartPos.y);
-
-                    // Detect scrolling (primarily vertical movement)
-                    const scrollThreshold = 10;
-                    if (dy > scrollThreshold || dx > scrollThreshold) {
+                    if (dy > 10 || dx > 10) {
                         isScrolling = true;
-                        // Cancel long-press timer if scrolling
                         if (touchTimer) {
                             clearTimeout(touchTimer);
                             touchTimer = null;
                         }
-                        // Hide tooltip if it was shown
-                        if (isLongPress) {
-                            hideTooltip();
-                            if(!pluginSettings.compact_view) cell.style.border = '1px solid #333';
-                            isLongPress = false;
-                        }
-                    }
-
-                    // Update tooltip position if long-press is active and not scrolling
-                    if (isLongPress && !isScrolling) {
-                        e.preventDefault(); // Prevent scrolling while showing tooltip
-                        showTooltip(touch.clientX, touch.clientY);
                     }
                 };
 
@@ -440,8 +447,12 @@
                         return;
                     }
 
-                    // Short tap without scrolling - seek to time
+                    // Short tap without scrolling - seek to time, then scroll to player
                     seekToTime();
+                    if (pluginSettings.auto_scroll && isMobileLayout()) {
+                        const player = getPlayer();
+                        if (player) player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
                     touchStartPos = null;
                 };
 
@@ -491,7 +502,7 @@
                     cells[safeIdx].element.style.boxShadow = 'inset 0 0 0 2px #00BFFF';
                     cells[safeIdx].element.style.zIndex = '1';
 
-                    if (pluginSettings.auto_scroll && spritesVisible) {
+                    if (pluginSettings.auto_scroll && spritesVisible && !isMobileLayout()) {
                         cells[safeIdx].element.scrollIntoView({
                             behavior: 'smooth',
                             block: 'center',
