@@ -6,13 +6,64 @@
 (function () {
     'use strict';
 
-    const BUTTON_ID = 'theater-mode-btn';
-    const STYLE_ID = 'theater-mode-styles';
-    const BODY_CLASS = 'stash-theater-mode';
+    const BUTTON_ID   = 'theater-mode-btn';
+    const STYLE_ID    = 'theater-mode-styles';
+    const BODY_CLASS  = 'stash-theater-mode';
+    const PLUGIN_ID   = 'TheaterMode';
+    const STORAGE_KEY = 'theater_mode_state';
+    const VALID_MODES = ['remember', 'always_on', 'always_off'];
 
-    let isTheaterMode = false;
-    let isInitializing = false;
+    let isTheaterMode   = false;
+    let isInitializing  = false;
     let keydownAttached = false;
+    let defaultMode     = 'remember'; // overwritten after settings load
+
+    // ── Persistence helpers ───────────────────────────────────────────────────
+
+    function getDefaultMode(pluginConfig) {
+        const mode = pluginConfig?.default_mode;
+        return VALID_MODES.includes(mode) ? mode : 'remember';
+    }
+
+    function getSavedTheaterState() {
+        try {
+            return localStorage.getItem(STORAGE_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setSavedTheaterState(enabled) {
+        try {
+            localStorage.setItem(STORAGE_KEY, enabled ? 'true' : 'false');
+        } catch (e) {
+            // Storage unavailable
+        }
+    }
+
+    // ── Stash API ─────────────────────────────────────────────────────────────
+
+    async function stashGQL(query) {
+        const response = await fetch('/graphql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+        });
+        const json = await response.json();
+        return json.data;
+    }
+
+    async function loadPluginSettings() {
+        const query = `query Configuration { configuration { plugins } }`;
+        try {
+            const data = await stashGQL(query);
+            const allPlugins = data?.configuration?.plugins;
+            defaultMode = getDefaultMode(allPlugins?.[PLUGIN_ID]);
+        } catch (e) {
+            console.warn('TheaterMode: Could not load plugin settings, using defaults', e);
+        }
+        return defaultMode;
+    }
 
     // ── Styles ────────────────────────────────────────────────────────────────
 
@@ -60,6 +111,15 @@
         document.head.appendChild(style);
     }
 
+    // Inject CSS and apply any saved theater mode state immediately at plugin
+    // startup, before the first React render, to prevent layout flash.
+    // applyInitialState() reconciles with the authoritative setting afterward.
+    injectStyles();
+    if (getSavedTheaterState()) {
+        document.body.classList.add(BODY_CLASS);
+        isTheaterMode = true;
+    }
+
     // ── Button ────────────────────────────────────────────────────────────────
 
     // Wide-screen icon: outer frame + filled inner rectangle representing the
@@ -105,6 +165,9 @@
         } else {
             enableTheaterMode();
         }
+        if (defaultMode === 'remember') {
+            setSavedTheaterState(isTheaterMode);
+        }
     }
 
     // ── Keyboard shortcut ─────────────────────────────────────────────────────
@@ -121,6 +184,23 @@
 
     // ── Initialization ────────────────────────────────────────────────────────
 
+    // Reconcile theater mode with the authoritative plugin setting after an
+    // async fetch. Runs outside the isInitializing guard so the button is never
+    // blocked by a pending network request. For 'always_off', also clears any
+    // stale localStorage state so the startup optimistic apply does not
+    // re-enable theater mode on the next page load.
+    async function applyInitialState() {
+        const mode = await loadPluginSettings();
+        if (!/\/scenes\/\d+/.test(window.location.pathname)) return;
+        if (mode === 'always_on') {
+            enableTheaterMode();
+        } else if (mode === 'always_off') {
+            disableTheaterMode();
+            setSavedTheaterState(false);
+        }
+        // 'remember': state was already applied synchronously from localStorage
+    }
+
     function init() {
         if (document.getElementById(BUTTON_ID)) return;
         if (isInitializing) return;
@@ -134,7 +214,22 @@
 
             if (document.getElementById(BUTTON_ID)) return;
 
+            // Re-apply theater mode synchronously for this scene. cleanup()
+            // disabled it when the user left the previous scene. On the first
+            // load defaultMode may still be 'remember' (fetch not yet done), so
+            // we use the localStorage state; applyInitialState() reconciles if
+            // the actual setting differs. On subsequent navigations defaultMode
+            // is cached and applied directly, avoiding any flash.
+            if (defaultMode === 'always_on' ||
+                (defaultMode === 'remember' && getSavedTheaterState())) {
+                document.body.classList.add(BODY_CLASS);
+                isTheaterMode = true;
+            }
+
             const btn = createButton();
+            // Sync the button's active state with the current theater mode so
+            // it renders correctly at insertion time rather than after the fetch.
+            if (isTheaterMode) btn.classList.add('active');
 
             // Insert to the left of the speed control, falling back to the
             // fullscreen control, then appending if neither is present.
@@ -158,6 +253,8 @@
                 document.addEventListener('keydown', handleKeydown);
                 keydownAttached = true;
             }
+
+            applyInitialState(); // async, does not block init()
         } finally {
             isInitializing = false;
         }

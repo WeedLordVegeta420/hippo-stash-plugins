@@ -6,7 +6,15 @@
  * without loading the IIFE directly (following the same approach as SpriteTab).
  */
 
-const { findInsertionPoint, shouldHandleKeydown } = require('../src/core');
+const {
+    findInsertionPoint,
+    shouldHandleKeydown,
+    getDefaultMode,
+    getSavedTheaterState,
+    setSavedTheaterState,
+    STORAGE_KEY,
+    VALID_MODES,
+} = require('../src/core');
 
 // ── Constants mirrored from theater.js ────────────────────────────────────────
 const BUTTON_ID   = 'theater-mode-btn';
@@ -418,6 +426,65 @@ describe('Keyboard shortcut integration', () => {
     });
 });
 
+// ── Init guard: isInitializing released synchronously ────────────────────────
+//
+// Regression: when init() was made async, isInitializing stayed true for the
+// entire duration of the GraphQL settings fetch (~100 ms). Stash's Video.js
+// player routinely remounts the control bar during that window. The observer
+// would see a fresh bar with no button, but isInitializing was still true so
+// init() returned early and the button was never re-inserted.
+//
+// The fix: keep init() synchronous so the flag is released before any await,
+// and fire applyInitialState() as a separate async function that does not hold
+// the guard.
+
+describe('Init guard: isInitializing released synchronously', () => {
+    /** Mirrors the fixed init() pattern: synchronous body + fire-and-forget async. */
+    function simulateInit(controlBar, state) {
+        if (document.getElementById(BUTTON_ID)) return false;
+        if (state.isInitializing) return false;
+        state.isInitializing = true;
+        try {
+            if (!controlBar) return false;
+            if (document.getElementById(BUTTON_ID)) return false;
+            controlBar.appendChild(makeButton());
+            // applyInitialState() would fire-and-forget here without holding the lock
+            return true;
+        } finally {
+            state.isInitializing = false; // released synchronously, before any await
+        }
+    }
+
+    it('releases the guard before applyInitialState resolves', () => {
+        const state = { isInitializing: false };
+        const bar = makeControlBar();
+        simulateInit(bar, state);
+        // Immediately after init() returns the guard must be free — even though
+        // the async settings fetch has not yet completed.
+        expect(state.isInitializing).toBe(false);
+    });
+
+    it('allows re-init after VJS remounts the control bar while applyInitialState is pending', () => {
+        const state = { isInitializing: false };
+
+        // First init: button inserted into the original bar.
+        const bar1 = makeControlBar();
+        expect(simulateInit(bar1, state)).toBe(true);
+        expect(document.getElementById(BUTTON_ID)).not.toBeNull();
+
+        // VJS tears down the control bar (taking the button with it) while
+        // applyInitialState is still awaiting the settings fetch.
+        document.body.removeChild(bar1);
+        expect(document.getElementById(BUTTON_ID)).toBeNull();
+        expect(state.isInitializing).toBe(false); // guard already released
+
+        // A new control bar mounts. init() must succeed and re-insert the button.
+        const bar2 = makeControlBar();
+        expect(simulateInit(bar2, state)).toBe(true);
+        expect(document.getElementById(BUTTON_ID)).not.toBeNull();
+    });
+});
+
 // ── Init guards ───────────────────────────────────────────────────────────────
 
 describe('Init guard patterns', () => {
@@ -482,5 +549,280 @@ describe('Cleanup on navigation away from a scene page', () => {
         }
 
         expect(document.body.classList.contains(BODY_CLASS)).toBe(true);
+    });
+});
+
+// ── getDefaultMode ────────────────────────────────────────────────────────────
+
+describe('getDefaultMode', () => {
+    it('returns "remember" when pluginConfig is null', () => {
+        expect(getDefaultMode(null)).toBe('remember');
+    });
+
+    it('returns "remember" when pluginConfig is undefined', () => {
+        expect(getDefaultMode(undefined)).toBe('remember');
+    });
+
+    it('returns "remember" when default_mode is absent', () => {
+        expect(getDefaultMode({})).toBe('remember');
+    });
+
+    it('returns "remember" when default_mode is an unrecognised string', () => {
+        expect(getDefaultMode({ default_mode: 'bogus' })).toBe('remember');
+        expect(getDefaultMode({ default_mode: '' })).toBe('remember');
+        expect(getDefaultMode({ default_mode: 'ALWAYS_ON' })).toBe('remember');
+    });
+
+    it('returns "remember" for the remember value', () => {
+        expect(getDefaultMode({ default_mode: 'remember' })).toBe('remember');
+    });
+
+    it('returns "always_on" for the always_on value', () => {
+        expect(getDefaultMode({ default_mode: 'always_on' })).toBe('always_on');
+    });
+
+    it('returns "always_off" for the always_off value', () => {
+        expect(getDefaultMode({ default_mode: 'always_off' })).toBe('always_off');
+    });
+
+    it('accepts every value in VALID_MODES and returns it unchanged', () => {
+        for (const mode of VALID_MODES) {
+            expect(getDefaultMode({ default_mode: mode })).toBe(mode);
+        }
+    });
+});
+
+// ── getSavedTheaterState ──────────────────────────────────────────────────────
+
+describe('getSavedTheaterState', () => {
+    /** Minimal localStorage stub */
+    function makeStorage(initial = {}) {
+        const store = { ...initial };
+        return {
+            getItem: (key) => store[key] ?? null,
+            setItem: (key, val) => { store[key] = String(val); },
+        };
+    }
+
+    it('returns false when storage is null', () => {
+        expect(getSavedTheaterState(null)).toBe(false);
+    });
+
+    it('returns false when the key is absent', () => {
+        expect(getSavedTheaterState(makeStorage())).toBe(false);
+    });
+
+    it('returns false when the stored value is "false"', () => {
+        expect(getSavedTheaterState(makeStorage({ [STORAGE_KEY]: 'false' }))).toBe(false);
+    });
+
+    it('returns true when the stored value is "true"', () => {
+        expect(getSavedTheaterState(makeStorage({ [STORAGE_KEY]: 'true' }))).toBe(true);
+    });
+
+    it('returns false when the stored value is truthy but not exactly "true"', () => {
+        expect(getSavedTheaterState(makeStorage({ [STORAGE_KEY]: '1' }))).toBe(false);
+        expect(getSavedTheaterState(makeStorage({ [STORAGE_KEY]: 'yes' }))).toBe(false);
+    });
+
+    it('returns false when storage.getItem throws', () => {
+        const broken = { getItem: () => { throw new Error('quota'); } };
+        expect(getSavedTheaterState(broken)).toBe(false);
+    });
+});
+
+// ── setSavedTheaterState ──────────────────────────────────────────────────────
+
+describe('setSavedTheaterState', () => {
+    function makeStorage() {
+        const store = {};
+        return {
+            getItem: (key) => store[key] ?? null,
+            setItem: (key, val) => { store[key] = String(val); },
+            _store: store,
+        };
+    }
+
+    it('writes "true" when enabled is true', () => {
+        const s = makeStorage();
+        setSavedTheaterState(true, s);
+        expect(s._store[STORAGE_KEY]).toBe('true');
+    });
+
+    it('writes "false" when enabled is false', () => {
+        const s = makeStorage();
+        setSavedTheaterState(false, s);
+        expect(s._store[STORAGE_KEY]).toBe('false');
+    });
+
+    it('does nothing when storage is null', () => {
+        // Should not throw
+        expect(() => setSavedTheaterState(true, null)).not.toThrow();
+    });
+
+    it('does not throw when storage.setItem throws', () => {
+        const broken = { setItem: () => { throw new Error('quota'); } };
+        expect(() => setSavedTheaterState(true, broken)).not.toThrow();
+    });
+
+    it('round-trips with getSavedTheaterState', () => {
+        const s = makeStorage();
+        setSavedTheaterState(true, s);
+        expect(getSavedTheaterState(s)).toBe(true);
+        setSavedTheaterState(false, s);
+        expect(getSavedTheaterState(s)).toBe(false);
+    });
+});
+
+// ── Persistence integration ───────────────────────────────────────────────────
+
+describe('Persistence: toggleTheaterMode saves state in remember mode', () => {
+    function makeStorage() {
+        const store = {};
+        return {
+            getItem: (key) => store[key] ?? null,
+            setItem: (key, val) => { store[key] = String(val); },
+            _store: store,
+        };
+    }
+
+    /** Simulate toggleTheaterMode with a given defaultMode and storage. */
+    function simulateToggle(isOn, defaultMode, storage) {
+        // Mirrors the logic in theater.js toggleTheaterMode()
+        const newState = !isOn;
+        if (defaultMode === 'remember') {
+            setSavedTheaterState(newState, storage);
+        }
+        return newState;
+    }
+
+    it('saves true after toggling on in remember mode', () => {
+        const s = makeStorage();
+        simulateToggle(false, 'remember', s);
+        expect(getSavedTheaterState(s)).toBe(true);
+    });
+
+    it('saves false after toggling off in remember mode', () => {
+        const s = makeStorage();
+        simulateToggle(true, 'remember', s);
+        expect(getSavedTheaterState(s)).toBe(false);
+    });
+
+    it('does not write to storage in always_on mode', () => {
+        const s = makeStorage();
+        simulateToggle(false, 'always_on', s);
+        expect(s._store[STORAGE_KEY]).toBeUndefined();
+    });
+
+    it('does not write to storage in always_off mode', () => {
+        const s = makeStorage();
+        simulateToggle(false, 'always_off', s);
+        expect(s._store[STORAGE_KEY]).toBeUndefined();
+    });
+});
+
+// ── Startup: optimistic apply from localStorage ───────────────────────────────
+//
+// Theater mode CSS and body class are applied synchronously at plugin startup
+// (before any React rendering) to prevent layout flash. The mode setting has
+// not been fetched yet, so we apply from localStorage unconditionally.
+// applyInitialState() reconciles afterward if the actual mode differs.
+
+describe('Startup: optimistic apply from localStorage', () => {
+    function makeStorage(initial = {}) {
+        const store = { ...initial };
+        return {
+            getItem: (key) => store[key] ?? null,
+            setItem: (key, val) => { store[key] = String(val); },
+        };
+    }
+
+    /** Mirrors the startup block in theater.js. */
+    function applyStartup(storage) {
+        return getSavedTheaterState(storage); // if true → add body class
+    }
+
+    it('applies theater mode immediately when localStorage state is true', () => {
+        expect(applyStartup(makeStorage({ [STORAGE_KEY]: 'true' }))).toBe(true);
+    });
+
+    it('does not apply theater mode when localStorage state is false', () => {
+        expect(applyStartup(makeStorage({ [STORAGE_KEY]: 'false' }))).toBe(false);
+    });
+
+    it('does not apply theater mode when no state is saved yet', () => {
+        expect(applyStartup(makeStorage())).toBe(false);
+    });
+});
+
+// ── Init: button active class matches theater mode state at insertion ──────────
+//
+// The button must render with the correct active state immediately on insertion,
+// not a few hundred ms later after the settings fetch resolves.
+
+describe('Init: button active class matches theater mode state at insertion', () => {
+    it('adds active class to button when theater mode is already on', () => {
+        const btn = makeButton();
+        const isTheaterMode = true;
+        if (isTheaterMode) btn.classList.add('active');
+        expect(btn.classList.contains('active')).toBe(true);
+    });
+
+    it('does not add active class when theater mode is off', () => {
+        const btn = makeButton();
+        const isTheaterMode = false;
+        if (isTheaterMode) btn.classList.add('active');
+        expect(btn.classList.contains('active')).toBe(false);
+    });
+});
+
+// ── applyInitialState: reconciles always_on / always_off overrides ────────────
+//
+// applyInitialState() runs after the async settings fetch. Its only job is to
+// reconcile cases where the actual mode differs from the optimistically-applied
+// state. 'remember' is a no-op here — state was already applied synchronously
+// at startup and in init().
+
+describe('applyInitialState: reconciles always_on / always_off overrides', () => {
+    function makeStorage(initial = {}) {
+        const store = { ...initial };
+        return {
+            getItem: (key) => store[key] ?? null,
+            setItem: (key, val) => { store[key] = String(val); },
+        };
+    }
+
+    /**
+     * Simulate applyInitialState(). currentlyEnabled is the theater mode state
+     * as applied by startup/init(). Returns the state after reconciliation.
+     */
+    function applyInitialState(mode, currentlyEnabled, storage) {
+        if (mode === 'always_on') return true;
+        if (mode === 'always_off') {
+            setSavedTheaterState(false, storage); // clear stale localStorage
+            return false;
+        }
+        return currentlyEnabled; // 'remember': leave unchanged
+    }
+
+    it('enables theater mode in always_on mode regardless of prior state', () => {
+        expect(applyInitialState('always_on', false, makeStorage())).toBe(true);
+        expect(applyInitialState('always_on', true,  makeStorage())).toBe(true);
+    });
+
+    it('disables theater mode in always_off mode regardless of prior state', () => {
+        expect(applyInitialState('always_off', true,  makeStorage())).toBe(false);
+        expect(applyInitialState('always_off', false, makeStorage())).toBe(false);
+    });
+
+    it('clears localStorage when mode is always_off to prevent future false-positive startup apply', () => {
+        const s = makeStorage({ [STORAGE_KEY]: 'true' });
+        applyInitialState('always_off', true, s);
+        expect(getSavedTheaterState(s)).toBe(false);
+    });
+
+    it('leaves state unchanged in remember mode (already applied synchronously)', () => {
+        expect(applyInitialState('remember', true,  makeStorage())).toBe(true);
+        expect(applyInitialState('remember', false, makeStorage())).toBe(false);
     });
 });

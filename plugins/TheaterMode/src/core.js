@@ -46,6 +46,62 @@ function shouldHandleKeydown(key, tagName, isContentEditable) {
     return true;
 }
 
+const PLUGIN_ID = 'TheaterMode';
+const STORAGE_KEY = 'theater_mode_state';
+const VALID_MODES = ['remember', 'always_on', 'always_off'];
+
+/**
+ * Extract and validate the default_mode setting from a plugin's config object.
+ * Returns 'remember' for any unrecognised or missing value.
+ *
+ * @param {object|null} pluginConfig - Value of data.configuration.plugins[PLUGIN_ID]
+ * @returns {'remember'|'always_on'|'always_off'}
+ */
+function getDefaultMode(pluginConfig) {
+    const mode = pluginConfig?.default_mode;
+    return VALID_MODES.includes(mode) ? mode : 'remember';
+}
+
+/**
+ * Read the persisted theater mode state from localStorage.
+ *
+ * @param {Storage} storage - Storage interface (defaults to localStorage)
+ * @returns {boolean} True if theater mode was on when last saved
+ */
+function getSavedTheaterState(storage) {
+    try {
+        if (!storage) return false;
+        return storage.getItem(STORAGE_KEY) === 'true';
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Persist the current theater mode state to localStorage.
+ *
+ * @param {boolean} enabled - Whether theater mode is currently on
+ * @param {Storage} storage - Storage interface (defaults to localStorage)
+ */
+function setSavedTheaterState(enabled, storage) {
+    try {
+        if (storage) {
+            storage.setItem(STORAGE_KEY, enabled ? 'true' : 'false');
+        }
+    } catch (e) {
+        // Storage may be unavailable (e.g. private mode with quota exceeded)
+    }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { findInsertionPoint, shouldHandleKeydown };
+    module.exports = {
+        findInsertionPoint,
+        shouldHandleKeydown,
+        getDefaultMode,
+        getSavedTheaterState,
+        setSavedTheaterState,
+        PLUGIN_ID,
+        STORAGE_KEY,
+        VALID_MODES,
+    };
 }
