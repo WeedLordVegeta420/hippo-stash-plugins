@@ -243,10 +243,16 @@
 
         const img = new Image();
         img.src = sceneData.paths.sprite;
-        img.onload = () => {
+        const loadSprites = () => {
             // Get thumbnail data from vjs player.
-            const vjsPlayer = document.getElementById("VideoJsPlayer").player;
-            const vttData = vjsPlayer.vttThumbnails().vttData;
+            const vjsElem = document.getElementById("VideoJsPlayer");
+            const vjsPlayer = vjsElem ? vjsElem.player : null;
+            const vttData = vjsPlayer ? vjsPlayer.vttThumbnails().vttData : null;
+            if (!vttData) {
+                // If VTT data is not available yet, wait and try again.
+                setTimeout(loadSprites, 100);
+                return;
+            }
 
             // Get h/w and rows/cols based on thumbnail size from VTT.
             const thumbW = vttData[0].style.width.replace("px","");
@@ -483,6 +489,8 @@
             scrollArea.appendChild(grid);
             attachVideoListeners(cells, sceneData.duration);
         };
+
+        img.onload = loadSprites;
 
         return mainContainer;
     }
