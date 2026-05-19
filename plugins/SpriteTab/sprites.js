@@ -5,7 +5,6 @@
     const STORAGE_KEY = 'stash_plugin_sprite_settings';
     const TAB_STATE_STORAGE_KEY = 'sprites_tab_state';
     const PLUGIN_ID = 'SpriteTab';
-    const SPRITE_WIDTH_GUESS = 160;
     const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
     const DEFAULTS = { cols: 4 };
     const VALID_DEFAULT_ACTIVE_MODES = ['remember', 'always_on', 'always_off'];
@@ -272,18 +271,31 @@
 
         const img = new Image();
         img.src = sceneData.paths.sprite;
-        img.onload = () => {
+        const loadSprites = () => {
+            // Get thumbnail data from vjs player.
+            const vjsElem = document.getElementById("VideoJsPlayer");
+            const vjsPlayer = vjsElem ? vjsElem.player : null;
+            const vttData = vjsPlayer ? vjsPlayer.vttThumbnails().vttData : null;
+            if (!vttData) {
+                // If VTT data is not available yet, wait and try again.
+                setTimeout(loadSprites, 100);
+                return;
+            }
+
+            // Get h/w and rows/cols based on thumbnail size from VTT.
+            const thumbW = vttData[0].style.width.replace("px","");
+            const thumbH = vttData[0].style.height.replace("px","");
             const sourceW = img.naturalWidth;
             const sourceH = img.naturalHeight;
-            const sourceCols = Math.round(sourceW / SPRITE_WIDTH_GUESS);
-            const singleH = (sourceW / sourceCols) * (9/16);
-            const sourceRows = Math.round(sourceH / singleH);
-            totalSpritesCount = sourceCols * sourceRows;
+            const sourceCols = Math.round(sourceW / thumbW);
+            const sourceRows = Math.round(sourceH / thumbH);
+            totalSpritesCount = vttData.length;
 
             // Shared across all cells so any touch blocks synthetic mouse events on all cells
             let lastTouchTime = 0;
 
             for (let i = 0; i < totalSpritesCount; i++) {
+                const vtt = vttData[i];
                 const cell = document.createElement('div');
                 cell.className = 'sprite-cell';
                 cell.style.cssText = `width: 100%; aspect-ratio: 16/9; background-image: url('${sceneData.paths.sprite}'); background-repeat: no-repeat; cursor: pointer; position: relative;`;
@@ -505,6 +517,8 @@
             scrollArea.appendChild(grid);
             attachVideoListeners(cells, sceneData.duration);
         };
+
+        img.onload = loadSprites;
 
         return mainContainer;
     }
