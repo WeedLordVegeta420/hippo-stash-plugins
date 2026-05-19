@@ -3,10 +3,12 @@
 
     // --- CONFIGURATION ---
     const STORAGE_KEY = 'stash_plugin_sprite_settings';
+    const TAB_STATE_STORAGE_KEY = 'sprites_tab_state';
     const PLUGIN_ID = 'SpriteTab';
     const SPRITE_WIDTH_GUESS = 160;
     const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
     const DEFAULTS = { cols: 4 };
+    const VALID_DEFAULT_ACTIVE_MODES = ['remember', 'always_on', 'always_off'];
 
     // Plugin settings cache
     let pluginSettings = {
@@ -17,6 +19,9 @@
         auto_scroll: true,
         grid_columns: null
     };
+
+    // Default-active mode (overwritten after settings load)
+    let defaultActiveMode = 'remember';
 
     // Initialization state to prevent race conditions
     let isInitializing = false;
@@ -125,8 +130,30 @@
         return json.data;
     }
 
+    function getSavedSpritesTabState() {
+        try {
+            return localStorage.getItem(TAB_STATE_STORAGE_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setSavedSpritesTabState(enabled) {
+        try {
+            localStorage.setItem(TAB_STATE_STORAGE_KEY, enabled ? 'true' : 'false');
+        } catch (e) {
+            // Storage unavailable
+        }
+    }
+
+    function getDefaultActiveMode(pluginConfig) {
+        const mode = pluginConfig?.default_active;
+        return VALID_DEFAULT_ACTIVE_MODES.includes(mode) ? mode : 'remember';
+    }
+
     async function loadPluginSettings() {
         const query = `query Configuration { configuration { plugins } }`;
+        defaultActiveMode = 'remember';
         try {
             const data = await stashGQL(query);
             const allPlugins = data?.configuration?.plugins;
@@ -138,6 +165,7 @@
                 pluginSettings.compact_view = settings.compact_view ?? false;
                 pluginSettings.auto_scroll = settings.auto_scroll ?? true;
                 pluginSettings.grid_columns = settings.grid_columns ?? null;
+                defaultActiveMode = getDefaultActiveMode(settings);
             }
         } catch (e) {
             console.warn('SpriteTab: Could not load plugin settings, using defaults', e);
@@ -601,35 +629,50 @@
                 }
             };
 
-            // Toggle sprites panel visibility
+            // Show the sprites panel. Programmatic activation (from
+            // applyInitialState) deliberately does NOT persist to localStorage;
+            // only an explicit user toggle should overwrite the saved state.
+            const activateSprites = async () => {
+                if (spritesVisible) return;
+                spritesVisible = true;
+
+                // Reload settings in case they changed
+                await rebuildPanel();
+
+                // Deactivate other tabs and activate sprites
+                if (navTabs) {
+                    navTabs.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+                }
+                tabContent.classList.add('stash-plugin-sprites-active');
+                btn.classList.add('sprites-active');
+
+                if (pluginSettings.auto_scroll) {
+                    const activeCell = tabPane.querySelector('.sprite-cell[style*="box-shadow"]');
+                    if (activeCell) activeCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            };
+
+            const deactivateSprites = () => {
+                if (!spritesVisible) return;
+                spritesVisible = false;
+                tabContent.classList.remove('stash-plugin-sprites-active');
+                btn.classList.remove('sprites-active');
+
+                if (navTabs) {
+                    const firstTab = navTabs.querySelector('.nav-link');
+                    if (firstTab) firstTab.click();
+                }
+            };
+
+            // Toggle sprites panel visibility (user-initiated)
             const toggleSprites = async () => {
-                spritesVisible = !spritesVisible;
-
                 if (spritesVisible) {
-                    // Reload settings in case they changed
-                    await rebuildPanel();
-
-                    // Deactivate other tabs and activate sprites
-                    if (navTabs) {
-                        navTabs.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-                    }
-                    tabContent.classList.add('stash-plugin-sprites-active');
-                    btn.classList.add('sprites-active');
-
-                    if (pluginSettings.auto_scroll) {
-                        const activeCell = tabPane.querySelector('.sprite-cell[style*="box-shadow"]');
-                        if (activeCell) activeCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
+                    deactivateSprites();
                 } else {
-                    // Hide sprites panel and show the first tab
-                    tabContent.classList.remove('stash-plugin-sprites-active');
-                    btn.classList.remove('sprites-active');
-
-                    // Activate the first tab
-                    if (navTabs) {
-                        const firstTab = navTabs.querySelector('.nav-link');
-                        if (firstTab) firstTab.click();
-                    }
+                    await activateSprites();
+                }
+                if (defaultActiveMode === 'remember') {
+                    setSavedSpritesTabState(spritesVisible);
                 }
             };
 
@@ -640,11 +683,28 @@
                 navTabs.addEventListener('click', (e) => {
                     const link = e.target.closest('.nav-link');
                     if (link) {
+                        const wasVisible = spritesVisible;
                         spritesVisible = false;
                         tabContent.classList.remove('stash-plugin-sprites-active');
                         btn.classList.remove('sprites-active');
+                        if (wasVisible && defaultActiveMode === 'remember') {
+                            setSavedSpritesTabState(false);
+                        }
                     }
                 }, { capture: true });
+            }
+
+            // Apply the default-active mode now that the panel is built. Runs
+            // after init's await loadPluginSettings(), so defaultActiveMode is
+            // authoritative here.
+            if (/\/scenes\/\d+/.test(window.location.pathname)) {
+                if (defaultActiveMode === 'always_on') {
+                    activateSprites();
+                } else if (defaultActiveMode === 'always_off') {
+                    setSavedSpritesTabState(false);
+                } else if (getSavedSpritesTabState()) {
+                    activateSprites();
+                }
             }
         } finally {
             isInitializing = false;

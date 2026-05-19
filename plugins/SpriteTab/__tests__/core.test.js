@@ -17,7 +17,9 @@ const {
     calculateSpriteTime,
     parsePluginSettings,
     parseSceneData,
-    extractSceneId
+    extractSceneId,
+    getDefaultActiveMode,
+    resolveInitialActiveState
 } = require('../src/core');
 
 describe('formatTime', () => {
@@ -508,5 +510,48 @@ describe('extractSceneId', () => {
     it('returns null for invalid scene paths', () => {
         expect(extractSceneId('/scenes/')).toBeNull();
         expect(extractSceneId('/scenes/abc')).toBeNull();
+    });
+});
+
+describe('getDefaultActiveMode', () => {
+    it('returns the configured mode when valid', () => {
+        expect(getDefaultActiveMode({ default_active: 'remember' })).toBe('remember');
+        expect(getDefaultActiveMode({ default_active: 'always_on' })).toBe('always_on');
+        expect(getDefaultActiveMode({ default_active: 'always_off' })).toBe('always_off');
+    });
+
+    it('falls back to "remember" for unknown modes', () => {
+        expect(getDefaultActiveMode({ default_active: 'banana' })).toBe('remember');
+        expect(getDefaultActiveMode({ default_active: '' })).toBe('remember');
+    });
+
+    it('falls back to "remember" when the setting is absent', () => {
+        expect(getDefaultActiveMode({})).toBe('remember');
+        expect(getDefaultActiveMode(null)).toBe('remember');
+        expect(getDefaultActiveMode(undefined)).toBe('remember');
+    });
+});
+
+describe('resolveInitialActiveState', () => {
+    it('always activates in always_on mode regardless of saved state', () => {
+        expect(resolveInitialActiveState('always_on', false)).toBe(true);
+        expect(resolveInitialActiveState('always_on', true)).toBe(true);
+    });
+
+    it('never activates in always_off mode regardless of saved state', () => {
+        expect(resolveInitialActiveState('always_off', true)).toBe(false);
+        expect(resolveInitialActiveState('always_off', false)).toBe(false);
+    });
+
+    it('defers to saved state in remember mode', () => {
+        expect(resolveInitialActiveState('remember', true)).toBe(true);
+        expect(resolveInitialActiveState('remember', false)).toBe(false);
+    });
+
+    it('coerces truthy/falsy saved states to booleans in remember mode', () => {
+        expect(resolveInitialActiveState('remember', 'true')).toBe(true);
+        expect(resolveInitialActiveState('remember', 0)).toBe(false);
+        expect(resolveInitialActiveState('remember', null)).toBe(false);
+        expect(resolveInitialActiveState('remember', undefined)).toBe(false);
     });
 });

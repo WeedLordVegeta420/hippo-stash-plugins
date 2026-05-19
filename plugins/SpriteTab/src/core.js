@@ -8,6 +8,7 @@ const PLUGIN_ID = 'SpriteTab';
 const DEFAULT_PREVIEW_WIDTH = 300;
 const SPRITE_WIDTH_GUESS = 160;
 const DEFAULTS = { cols: 0, showTime: true, compact: false, autoScroll: true };
+const VALID_DEFAULT_ACTIVE_MODES = ['remember', 'always_on', 'always_off'];
 
 /**
  * Format seconds into human-readable time string
@@ -227,6 +228,30 @@ function extractSceneId(pathname) {
     return match ? match[1] : null;
 }
 
+/**
+ * Validate and coerce the default_active plugin setting to a known mode.
+ * Falls back to 'remember' for missing or invalid values.
+ * @param {object} pluginConfig - The SpriteTab plugin config object
+ * @returns {'remember'|'always_on'|'always_off'}
+ */
+function getDefaultActiveMode(pluginConfig) {
+    const mode = pluginConfig && pluginConfig.default_active;
+    return VALID_DEFAULT_ACTIVE_MODES.indexOf(mode) >= 0 ? mode : 'remember';
+}
+
+/**
+ * Resolve whether the SpriteTab should auto-activate on scene load, given the
+ * configured mode and the persisted user toggle. Returns true to activate.
+ * @param {string} mode - One of 'remember' | 'always_on' | 'always_off'
+ * @param {boolean} savedState - Persisted user toggle (from localStorage)
+ * @returns {boolean}
+ */
+function resolveInitialActiveState(mode, savedState) {
+    if (mode === 'always_on') return true;
+    if (mode === 'always_off') return false;
+    return Boolean(savedState);
+}
+
 // Export for testing and module usage
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -247,6 +272,9 @@ if (typeof module !== 'undefined' && module.exports) {
         calculateSpriteTime,
         parsePluginSettings,
         parseSceneData,
-        extractSceneId
+        extractSceneId,
+        VALID_DEFAULT_ACTIVE_MODES,
+        getDefaultActiveMode,
+        resolveInitialActiveState
     };
 }
