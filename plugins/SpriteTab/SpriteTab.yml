@@ -4,6 +4,7 @@ version: 1.4
 url: https://github.com/hippochapel/hippo-stash-plugins/tree/main/plugins/SpriteTab
 ui:
   javascript:
+    - core.js
     - sprites.js
 settings:
   tooltip_enabled:

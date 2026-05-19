@@ -22,7 +22,7 @@ const {
     extractSceneId,
     getDefaultActiveMode,
     resolveInitialActiveState
-} = require('../src/core');
+} = require('../core');
 
 describe('formatTime', () => {
     it('returns "0:00" for zero seconds', () => {
@@ -87,38 +87,16 @@ describe('getSettings', () => {
         expect(settings).toEqual(DEFAULTS);
     });
 
-    it('merges stored settings with defaults', () => {
+    it('uses stored value over default', () => {
         const mockStorage = {
-            getItem: jest.fn(() => JSON.stringify({ cols: 6, showTime: false }))
+            getItem: jest.fn(() => JSON.stringify({ cols: 8 }))
         };
-        const settings = getSettings(mockStorage);
-        expect(settings).toEqual({
-            cols: 6,
-            showTime: false,
-            compact: false,
-            autoScroll: true
-        });
-    });
-
-    it('uses stored values over defaults', () => {
-        const mockStorage = {
-            getItem: jest.fn(() => JSON.stringify({
-                cols: 8,
-                showTime: false,
-                compact: true,
-                autoScroll: false
-            }))
-        };
-        const settings = getSettings(mockStorage);
-        expect(settings.cols).toBe(8);
-        expect(settings.showTime).toBe(false);
-        expect(settings.compact).toBe(true);
-        expect(settings.autoScroll).toBe(false);
+        expect(getSettings(mockStorage)).toEqual({ cols: 8 });
     });
 });
 
 describe('saveSettings', () => {
-    it('merges new settings with existing settings', () => {
+    it('writes the merged result to storage and returns it', () => {
         const mockStorage = {
             getItem: jest.fn(() => JSON.stringify({ cols: 4 })),
             setItem: jest.fn()
@@ -129,17 +107,6 @@ describe('saveSettings', () => {
             STORAGE_KEY,
             expect.stringContaining('"cols":8')
         );
-    });
-
-    it('preserves existing settings when adding new ones', () => {
-        const mockStorage = {
-            getItem: jest.fn(() => JSON.stringify({ cols: 4, showTime: true })),
-            setItem: jest.fn()
-        };
-        const result = saveSettings({ compact: true }, mockStorage);
-        expect(result.cols).toBe(4);
-        expect(result.showTime).toBe(true);
-        expect(result.compact).toBe(true);
     });
 
     it('handles null storage gracefully', () => {

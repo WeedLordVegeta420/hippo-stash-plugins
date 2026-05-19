@@ -1,13 +1,21 @@
 (function () {
     'use strict';
 
-    // --- CONFIGURATION ---
-    const STORAGE_KEY = 'stash_plugin_sprite_settings';
+    // Pure utilities live in core.js (loaded by SpriteTab.yml before this file).
+    // See __tests__/core.test.js for the canonical specs.
+    const {
+        PLUGIN_ID,
+        DEFAULT_PREVIEW_WIDTH,
+        formatTime,
+        getSettings,
+        saveSettings,
+        isMobileLayout,
+        getActiveSpriteIndex,
+        getDefaultActiveMode,
+    } = window.SpriteTabCore;
+
+    // sprites.js-only constants
     const TAB_STATE_STORAGE_KEY = 'sprites_tab_state';
-    const PLUGIN_ID = 'SpriteTab';
-    const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
-    const DEFAULTS = { cols: 4 };
-    const VALID_DEFAULT_ACTIVE_MODES = ['remember', 'always_on', 'always_off'];
     const SPRITE_WIDTH_GUESS = 160;
     const MAX_VTT_RETRIES = 30; // up to 30 retries at 100ms each after the initial check
 
@@ -34,34 +42,8 @@
     let spritesVisible = false;
 
     // --- HELPERS ---
-    function getSettings() {
-        try {
-            return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY)) };
-        } catch (e) { return DEFAULTS; }
-    }
-
-    function saveSettings(newSettings) {
-        const merged = { ...getSettings(), ...newSettings };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-        return merged;
-    }
-
-    function formatTime(seconds) {
-        if (!seconds) return "0:00";
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
-        return h > 0
-            ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-            : `${m}:${s.toString().padStart(2, '0')}`;
-    }
-
     function getPlayer() {
         return document.querySelector('video.vjs-tech') || document.querySelector('video');
-    }
-
-    function isMobileLayout() {
-        return window.matchMedia('(max-width: 767px)').matches;
     }
 
     // --- INJECT CUSTOM STYLES ---
@@ -145,11 +127,6 @@
         } catch (e) {
             // Storage unavailable
         }
-    }
-
-    function getDefaultActiveMode(pluginConfig) {
-        const mode = pluginConfig?.default_active;
-        return VALID_DEFAULT_ACTIVE_MODES.includes(mode) ? mode : 'remember';
     }
 
     async function loadPluginSettings() {
@@ -555,10 +532,7 @@
             const player = getPlayer();
             if (!player) return;
 
-            // Round (not floor): post-seek currentTime can land a few ms short
-            // of the requested target, which would otherwise floor to the previous sprite.
-            const idx = Math.round((player.currentTime / duration) * total);
-            const safeIdx = Math.max(0, Math.min(idx, total - 1));
+            const safeIdx = getActiveSpriteIndex(player.currentTime, total, duration);
 
             if (safeIdx !== currentActiveIndex) {
                 if (currentActiveIndex >= 0 && cells[currentActiveIndex]) {
