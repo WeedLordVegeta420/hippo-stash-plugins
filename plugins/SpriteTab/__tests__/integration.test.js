@@ -389,6 +389,90 @@ describe('CSS Style Application', () => {
                 user-select: none;
                 touch-action: pan-y;
             }
+            #sprite-gallery-controls:not(.gallery-controls-visible) .sprite-gallery-action-btn,
+            #sprite-gallery-controls:not(.gallery-controls-visible) .sprite-gallery-jump-btn,
+            #sprite-gallery-controls:not(.gallery-controls-visible) #sprite-gallery-scrubber,
+            #sprite-gallery-controls:not(.gallery-controls-visible) #sprite-gallery-debug {
+                pointer-events: none;
+            }
+            #sprite-gallery-controls.gallery-controls-visible .sprite-gallery-action-btn,
+            #sprite-gallery-controls.gallery-controls-visible .sprite-gallery-jump-btn,
+            #sprite-gallery-controls.gallery-controls-visible #sprite-gallery-scrubber,
+            #sprite-gallery-controls.gallery-controls-visible #sprite-gallery-debug {
+                pointer-events: auto;
+            }
+            #sprite-gallery-loading {
+                pointer-events: none;
+            }
+            #sprite-gallery-loading.sprite-gallery-loading-corner {
+                top: 12px;
+                right: 12px;
+                left: auto;
+                width: 18px;
+                height: 18px;
+                padding: 0;
+                border-radius: 999px;
+                background: rgba(0,0,0,0.45);
+                border: 2px solid rgba(255,255,255,0.25);
+                border-top-color: rgba(255,255,255,0.95);
+                box-shadow: 0 0 0 1px rgba(0,0,0,0.2);
+                animation: sprite-gallery-loading-spin 0.8s linear infinite;
+            }
+            @keyframes sprite-gallery-loading-spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+            html.stash-gallery-scroll-lock,
+            body.stash-gallery-scroll-lock {
+                overflow: hidden !important;
+                overscroll-behavior: none;
+            }
+            html.stash-gallery-scroll-soft-lock,
+            body.stash-gallery-scroll-soft-lock {
+                overflow-x: hidden !important;
+                overflow-y: auto !important;
+                overscroll-behavior-x: none;
+            }
+            body.stash-gallery-scroll-soft-lock {
+                min-height: calc(100% + 240px);
+                padding-bottom: 240px;
+                box-sizing: border-box;
+                -webkit-overflow-scrolling: touch;
+            }
+            @media (max-width: 767px) {
+                #sprite-gallery-debug {
+                    display: none;
+                }
+            }
+            #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-debug {
+                display: none;
+            }
+            #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-controls-row.bottom {
+                bottom: 12px;
+                width: auto;
+                max-width: calc(100% - 40px);
+                gap: 8px;
+            }
+            #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-jumps {
+                width: auto;
+                max-width: 100%;
+            }
+            #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-scrubber {
+                width: min(100%, 280px);
+            }
+            #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-action-btn,
+            #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-jump-btn,
+            #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-time {
+                font-size: 13px !important;
+                padding: 6px 10px;
+            }
+            #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-img {
+                width: 100dvw;
+                height: 100dvh;
+                max-width: 100dvw;
+                max-height: 100dvh;
+                object-fit: contain;
+            }
         `;
         document.head.appendChild(style);
 
@@ -402,6 +486,12 @@ describe('CSS Style Application', () => {
         // This test verifies the CSS is at least parseable
         expect(style.textContent).toContain('touch-action: pan-y');
         expect(style.textContent).toContain('-webkit-touch-callout: none');
+        expect(style.textContent).toContain('#sprite-gallery-controls:not(.gallery-controls-visible)');
+        expect(style.textContent).toContain('#sprite-gallery-loading');
+        expect(style.textContent).toContain('stash-gallery-scroll-lock');
+        expect(style.textContent).toContain('stash-gallery-scroll-soft-lock');
+        expect(style.textContent).toContain('padding-bottom: 240px');
+        expect(style.textContent).toContain('object-fit: contain');
     });
 });
 
@@ -633,6 +723,94 @@ describe('Auto-scroll layout awareness', () => {
         }
 
         expect(mockScrollIntoView).not.toHaveBeenCalled();
+    });
+});
+
+describe('Sprite selection sync', () => {
+    it('subscribes to time updates immediately when the player already exists and updates the active sprite', () => {
+        const cells = Array.from({ length: 4 }, () => ({
+            element: document.createElement('div')
+        }));
+        const player = document.createElement('video');
+        const addEventListenerSpy = jest.spyOn(player, 'addEventListener');
+        player.currentTime = 30;
+
+        const getPlayer = () => player;
+        const isMobileLayout = () => false;
+        const pluginSettings = { auto_scroll: true };
+        const spritesVisible = false;
+
+        const getSpriteIndexAtTime = (time, duration, totalSpritesCount) => {
+            const interval = totalSpritesCount > 0 && duration > 0 ? duration / totalSpritesCount : 0;
+            if (!(interval > 0)) return 0;
+            return Math.max(
+                0,
+                Math.min(totalSpritesCount - 1, Math.floor((Math.max(0, Math.min(duration, time)) / interval) + 0.05))
+            );
+        };
+
+        const attachVideoListeners = (spriteCells, duration) => {
+            let currentActiveIndex = -1;
+            const total = spriteCells.length;
+            let boundPlayer = null;
+
+            const update = () => {
+                const nextPlayer = getPlayer();
+                if (!nextPlayer) return;
+
+                const safeIdx = getSpriteIndexAtTime(nextPlayer.currentTime, duration, total);
+
+                if (safeIdx !== currentActiveIndex) {
+                    if (currentActiveIndex >= 0 && spriteCells[currentActiveIndex]) {
+                        spriteCells[currentActiveIndex].element.style.boxShadow = 'none';
+                        spriteCells[currentActiveIndex].element.style.zIndex = '0';
+                    }
+
+                    if (spriteCells[safeIdx]) {
+                        spriteCells[safeIdx].element.style.boxShadow = 'inset 0 0 0 2px #00BFFF';
+                        spriteCells[safeIdx].element.style.zIndex = '1';
+
+                        if (pluginSettings.auto_scroll && spritesVisible && !isMobileLayout()) {
+                            spriteCells[safeIdx].element.scrollIntoView({
+                                behavior: 'smooth',
+                                block: 'center',
+                                inline: 'nearest'
+                            });
+                        }
+
+                        currentActiveIndex = safeIdx;
+                    }
+                }
+            };
+
+            const bindPlayer = () => {
+                const nextPlayer = getPlayer();
+                if (!nextPlayer || nextPlayer === boundPlayer) return false;
+                nextPlayer.addEventListener('timeupdate', update);
+                update();
+                boundPlayer = nextPlayer;
+                return true;
+            };
+
+            if (bindPlayer()) return;
+
+            const poller = setInterval(() => {
+                if (bindPlayer()) {
+                    clearInterval(poller);
+                }
+            }, 1000);
+        };
+
+        attachVideoListeners(cells, 120);
+
+        expect(addEventListenerSpy).toHaveBeenCalledWith('timeupdate', expect.any(Function));
+        expect(cells[1].element.style.boxShadow).toBe('inset 0 0 0 2px #00BFFF');
+
+        player.currentTime = 60;
+        player.dispatchEvent(new Event('timeupdate'));
+
+        expect(cells[1].element.style.boxShadow).toBe('none');
+        expect(cells[2].element.style.boxShadow).toBe('inset 0 0 0 2px #00BFFF');
     });
 });
 

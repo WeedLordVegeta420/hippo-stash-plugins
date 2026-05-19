@@ -18,6 +18,8 @@
     const TAB_STATE_STORAGE_KEY = 'sprites_tab_state';
     const SPRITE_WIDTH_GUESS = 160;
     const MAX_VTT_RETRIES = 30; // up to 30 retries at 100ms each after the initial check
+    const SEEK_TIMEOUT_MS = 25000;
+    const SPRITE_INDEX_EPSILON = 0.05;
 
     // Plugin settings cache
     let pluginSettings = {
@@ -41,9 +43,292 @@
     // Track if sprites panel is currently shown
     let spritesVisible = false;
 
+    // Scene ID of the currently viewed scene (set in init, cleared on navigation)
+    let currentSceneId = null;
+
     // --- HELPERS ---
     function getPlayer() {
         return document.querySelector('video.vjs-tech') || document.querySelector('video');
+    }
+
+    function getSpritePreviewMountNode() {
+        return document.body;
+    }
+
+    function getSpritePreviewBox() {
+        let previewBox = document.getElementById('stash-sprite-preview');
+        if (!previewBox) {
+            previewBox = document.createElement('div');
+            previewBox.id = 'stash-sprite-preview';
+            const timeDisplay = document.createElement('div');
+            timeDisplay.className = 'preview-time';
+            previewBox.appendChild(timeDisplay);
+        }
+        const mountNode = getSpritePreviewMountNode();
+        if (previewBox.parentElement !== mountNode) {
+            mountNode.appendChild(previewBox);
+        }
+        return previewBox;
+    }
+
+    function hideSpritePreview() {
+        const previewBox = document.getElementById('stash-sprite-preview');
+        if (previewBox) {
+            previewBox.style.display = 'none';
+        }
+    }
+
+    function getSpritePreviewDimensions() {
+        const maxWidth = Math.max(180, (window.innerWidth || DEFAULT_PREVIEW_WIDTH) - 24);
+        const width = Math.min(pluginSettings.tooltip_width || DEFAULT_PREVIEW_WIDTH, maxWidth);
+        return {
+            width,
+            height: width * (9 / 16)
+        };
+    }
+
+    function getSpritePreviewDataForTime(time) {
+        if (!currentSceneData?.paths?.sprite) return null;
+
+        const cells = Array.from(document.querySelectorAll('#stash-sprite-grid .sprite-cell'));
+        const duration = currentSceneData?.duration || getGalleryDuration();
+        if (cells.length === 0 || !(duration > 0)) return null;
+
+        const alignedTime = getGallerySpriteAlignedTime(time, cells, duration);
+        const spriteIndex = getSpriteIndexAtTime(alignedTime, duration, cells.length);
+        const cell = cells[spriteIndex];
+        if (!cell) return null;
+
+        return {
+            backgroundImage: cell.style.backgroundImage || `url('${currentSceneData.paths.sprite}')`,
+            backgroundSize: cell.style.backgroundSize || '',
+            backgroundPosition: cell.style.backgroundPosition || '0% 0%',
+            timeText: formatTime(alignedTime)
+        };
+    }
+
+    function showSpritePreview(previewData, { left, top } = {}) {
+        if (!previewData) {
+            hideSpritePreview();
+            return;
+        }
+
+        const previewBox = getSpritePreviewBox();
+        const previewTimeDisplay = previewBox.querySelector('.preview-time');
+
+        previewBox.style.backgroundImage = previewData.backgroundImage;
+        previewBox.style.backgroundSize = previewData.backgroundSize;
+        previewBox.style.backgroundPosition = previewData.backgroundPosition;
+        previewTimeDisplay.innerText = previewData.timeText;
+        previewBox.style.left = `${left}px`;
+        previewBox.style.top = `${top}px`;
+        previewBox.style.display = 'block';
+    }
+
+    function isTouchCapableDevice() {
+        const hasTouchPoints = Number.isFinite(navigator.maxTouchPoints) && navigator.maxTouchPoints > 0;
+        const coarsePointer = typeof window.matchMedia === 'function'
+            && window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+        return hasTouchPoints || coarsePointer;
+    }
+
+    function isPhoneSizedTouchLayout() {
+        if (isMobileLayout()) return true;
+        if (!isTouchCapableDevice()) return false;
+
+        const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+        const shortestViewportEdge = Math.min(viewportWidth, viewportHeight);
+        return shortestViewportEdge > 0 && shortestViewportEdge <= 500;
+    }
+
+    function normalizeGalleryTime(time) {
+        return Number.isFinite(time) ? Math.max(0, time) : 0;
+    }
+
+    function getGalleryDuration() {
+        const sceneDuration = currentSceneData?.duration;
+        if (Number.isFinite(sceneDuration) && sceneDuration > 0) {
+            return sceneDuration;
+        }
+
+        const controller = getPlaybackController();
+        const playerDuration = controller?.mediaEl?.duration;
+        return Number.isFinite(playerDuration) && playerDuration > 0 ? playerDuration : 0;
+    }
+
+    function clampGalleryTime(time) {
+        const nextTime = normalizeGalleryTime(time);
+        const duration = getGalleryDuration();
+        return duration > 0 ? Math.min(nextTime, duration) : nextTime;
+    }
+
+    function getSpriteInterval(duration, totalSpritesCount) {
+        return totalSpritesCount > 0 && duration > 0 ? duration / totalSpritesCount : 0;
+    }
+
+    function getSpriteSelectionTime(index, totalSpritesCount, duration) {
+        const interval = getSpriteInterval(duration, totalSpritesCount);
+        if (!(interval > 0)) return 0;
+
+        return Math.max(0, Math.min(duration, interval * index));
+    }
+
+    function getSpriteIndexAtTime(time, duration, totalSpritesCount) {
+        const interval = getSpriteInterval(duration, totalSpritesCount);
+        if (!(interval > 0)) return 0;
+
+        return Math.max(
+            0,
+            Math.min(totalSpritesCount - 1, Math.floor((normalizeGalleryTime(time) + SPRITE_INDEX_EPSILON) / interval))
+        );
+    }
+
+    function getGallerySpriteAlignedTime(time, cells = Array.from(document.querySelectorAll('#stash-sprite-grid .sprite-cell')), duration = currentSceneData?.duration || getGalleryDuration()) {
+        if (cells.length === 0 || !(duration > 0)) return clampGalleryTime(time);
+        const spriteIndex = getSpriteIndexAtTime(time, duration, cells.length);
+        return getSpriteSelectionTime(spriteIndex, cells.length, duration);
+    }
+
+    function isSameGalleryTime(a, b) {
+        return a !== null && b !== null && Math.abs(a - b) <= 0.05;
+    }
+
+    function getPlaybackController() {
+        const mediaEl = getPlayer();
+        if (!mediaEl) return null;
+
+        const videoJsContainer = mediaEl.closest('.video-js');
+        const apiCandidates = [
+            mediaEl.player,
+            mediaEl.__videojsPlayer,
+            videoJsContainer?.player,
+            videoJsContainer?.__videojsPlayer
+        ].filter(Boolean);
+
+        const api = apiCandidates.find((candidate) =>
+            typeof candidate.currentTime === 'function' ||
+            typeof candidate.pause === 'function' ||
+            typeof candidate.play === 'function'
+        ) || null;
+
+        const eventTarget = api && (typeof api.addEventListener === 'function' || typeof api.on === 'function')
+            ? api
+            : mediaEl;
+
+        return { mediaEl, api, eventTarget };
+    }
+
+    function getControllerTime(controller) {
+        if (!controller) return 0;
+
+        if (controller.api && typeof controller.api.currentTime === 'function') {
+            const apiTime = controller.api.currentTime();
+            if (Number.isFinite(apiTime)) return apiTime;
+        }
+
+        return normalizeGalleryTime(controller.mediaEl?.currentTime ?? 0);
+    }
+
+    function setControllerTime(controller, time) {
+        if (!controller) return;
+        const previousTime = getControllerTime(controller);
+        const nextTime = normalizeGalleryTime(time);
+        let apiUpdated = false;
+
+        if (controller.api && typeof controller.api.currentTime === 'function') {
+            controller.api.currentTime(nextTime);
+            apiUpdated = true;
+        }
+
+        if (controller.mediaEl) {
+            try {
+                if (!isSameGalleryTime(controller.mediaEl.currentTime, nextTime) || !apiUpdated) {
+                    controller.mediaEl.currentTime = nextTime;
+                }
+            } catch (_) {
+                // Some players reject currentTime updates until metadata is ready.
+            }
+        }
+
+        if (!isSameGalleryTime(getControllerTime(controller), previousTime)) {
+            if (typeof controller.mediaEl?.dispatchEvent === 'function') {
+                try {
+                    controller.mediaEl.dispatchEvent(new Event('timeupdate', { bubbles: true }));
+                } catch (_) {
+                    // Ignore synthetic event failures on non-DOM media shims.
+                }
+            }
+            if (controller.api && typeof controller.api.trigger === 'function') {
+                try {
+                    controller.api.trigger('timeupdate');
+                } catch (_) {
+                    // Ignore trigger failures on non-Video.js players.
+                }
+            }
+        }
+    }
+
+    function isControllerPaused(controller) {
+        if (!controller) return true;
+
+        if (controller.api && typeof controller.api.paused === 'function') {
+            return controller.api.paused();
+        }
+
+        return controller.mediaEl?.paused ?? true;
+    }
+
+    function pauseController(controller) {
+        if (!controller) return;
+
+        if (controller.api && typeof controller.api.pause === 'function') {
+            controller.api.pause();
+            return;
+        }
+
+        if (typeof controller.mediaEl?.pause === 'function') {
+            controller.mediaEl.pause();
+        }
+    }
+
+    function playController(controller) {
+        if (!controller) return;
+
+        if (controller.api && typeof controller.api.play === 'function') {
+            controller.api.play();
+            return;
+        }
+
+        if (typeof controller.mediaEl?.play === 'function') {
+            controller.mediaEl.play();
+        }
+    }
+
+    function addControllerListener(target, eventName, handler) {
+        if (!target) return;
+
+        if (typeof target.addEventListener === 'function') {
+            target.addEventListener(eventName, handler);
+            return;
+        }
+
+        if (typeof target.on === 'function') {
+            target.on(eventName, handler);
+        }
+    }
+
+    function removeControllerListener(target, eventName, handler) {
+        if (!target) return;
+
+        if (typeof target.removeEventListener === 'function') {
+            target.removeEventListener(eventName, handler);
+            return;
+        }
+
+        if (typeof target.off === 'function') {
+            target.off(eventName, handler);
+        }
     }
 
     // --- INJECT CUSTOM STYLES ---
@@ -99,6 +384,346 @@
             #sprites-toolbar-btn.sprites-active {
                 color: #007bff !important;
             }
+            /* Gallery overlay */
+            #sprite-gallery-overlay {
+                position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #000; z-index: 9999;
+                display: flex; align-items: center; justify-content: center;
+                box-sizing: border-box;
+                overflow: hidden;
+            }
+            #sprite-gallery-overlay.gallery-overlay-fullscreen {
+                position: fixed;
+                inset: 0;
+                z-index: 2147483647;
+            }
+            html.stash-gallery-scroll-lock,
+            body.stash-gallery-scroll-lock {
+                overflow: hidden !important;
+                overscroll-behavior: none;
+            }
+            html.stash-gallery-scroll-soft-lock,
+            body.stash-gallery-scroll-soft-lock {
+                overflow-x: hidden !important;
+                overflow-y: auto !important;
+                overscroll-behavior-x: none;
+            }
+            body.stash-gallery-scroll-soft-lock {
+                min-height: calc(100% + 240px);
+                padding-bottom: 240px;
+                box-sizing: border-box;
+                -webkit-overflow-scrolling: touch;
+            }
+            #sprite-gallery-frame {
+                position: relative;
+                width: 100%;
+                height: 100%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+            }
+            #sprite-gallery-viewport {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                touch-action: none;
+                overscroll-behavior: contain;
+            }
+            #sprite-gallery-overlay img {
+                max-width: 100%; max-height: 100%; object-fit: contain; display: block;
+                transform-origin: center center;
+                will-change: transform;
+                -webkit-user-drag: none;
+                user-select: none;
+                pointer-events: none;
+            }
+            #sprite-gallery-controls {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                padding: 10px;
+                box-sizing: border-box;
+                opacity: 0;
+                pointer-events: none;
+                z-index: 2;
+                transition: opacity 0.15s ease;
+            }
+            #sprite-gallery-controls.gallery-controls-visible {
+                opacity: 1;
+            }
+            #sprite-gallery-controls:not(.gallery-controls-visible) .sprite-gallery-action-btn,
+            #sprite-gallery-controls:not(.gallery-controls-visible) .sprite-gallery-jump-btn,
+            #sprite-gallery-controls:not(.gallery-controls-visible) #sprite-gallery-scrubber,
+            #sprite-gallery-controls:not(.gallery-controls-visible) #sprite-gallery-debug {
+                pointer-events: none;
+            }
+            #sprite-gallery-controls.gallery-controls-visible .sprite-gallery-action-btn,
+            #sprite-gallery-controls.gallery-controls-visible .sprite-gallery-jump-btn,
+            #sprite-gallery-controls.gallery-controls-visible #sprite-gallery-scrubber,
+            #sprite-gallery-controls.gallery-controls-visible #sprite-gallery-debug {
+                pointer-events: auto;
+            }
+            .sprite-gallery-controls-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                box-sizing: border-box;
+                pointer-events: none;
+            }
+            .sprite-gallery-controls-row.top {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+                align-items: flex-start;
+            }
+            .sprite-gallery-controls-row.bottom {
+                position: absolute;
+                left: 50%;
+                bottom: calc(var(--gallery-controls-offset, 0px) + 10px);
+                transform: translateX(-50%);
+                width: min(calc(100% - 24px), 760px);
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            #sprite-gallery-loading {
+                position: absolute;
+                color: #fff;
+                font-size: 16px;
+                background: rgba(0,0,0,0.75);
+                padding: 6px 10px;
+                border-radius: 6px;
+                pointer-events: none;
+            }
+            #sprite-gallery-loading.sprite-gallery-loading-corner {
+                top: 12px;
+                right: 12px;
+                left: auto;
+                width: 18px;
+                height: 18px;
+                padding: 0;
+                border-radius: 999px;
+                background: rgba(0,0,0,0.45);
+                border: 2px solid rgba(255,255,255,0.25);
+                border-top-color: rgba(255,255,255,0.95);
+                box-shadow: 0 0 0 1px rgba(0,0,0,0.2);
+                animation: sprite-gallery-loading-spin 0.8s linear infinite;
+            }
+            @keyframes sprite-gallery-loading-spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+            .gallery-mode-checkbox-label {
+                display: flex; align-items: center; gap: 6px;
+                color: #ccc; font-size: 12px; cursor: pointer; white-space: nowrap;
+                margin-right: 10px;
+            }
+            .sprite-gallery-actions,
+            .sprite-gallery-jumps {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                flex-wrap: wrap;
+            }
+            .sprite-gallery-actions {
+                margin-left: auto;
+                justify-content: flex-end;
+            }
+            .sprite-gallery-jumps {
+                justify-content: center;
+                width: 100%;
+            }
+            .sprite-gallery-action-btn,
+            .sprite-gallery-jump-btn {
+                background: rgba(12,12,12,0.88);
+                color: #fff;
+                border: 1px solid rgba(255,255,255,0.72);
+                border-radius: 999px;
+                padding: 7px 12px;
+                cursor: pointer;
+                font-size: 15px !important;
+                font-weight: 600;
+                line-height: 1.2 !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.32);
+                text-shadow: 0 1px 2px rgba(0,0,0,0.65);
+            }
+            .sprite-gallery-action-btn:disabled,
+            .sprite-gallery-jump-btn:disabled {
+                opacity: 0.45;
+                cursor: default;
+            }
+            .sprite-gallery-jump-btn.sprite-gallery-jump-btn-cached:not(:disabled) {
+                background: rgba(156, 112, 19, 0.95);
+                color: #fff6d6;
+                border-color: rgba(255, 224, 138, 0.95);
+                box-shadow: 0 0 0 1px rgba(255, 214, 102, 0.24), 0 6px 16px rgba(89, 57, 0, 0.45);
+            }
+            #sprite-gallery-time {
+                background: rgba(0,0,0,0.8); color: #fff; font-size: 17px !important;
+                padding: 7px 12px; border-radius: 999px; font-weight: bold;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            }
+            #sprite-gallery-scrubber {
+                display: block;
+                flex: none;
+                width: min(100%, 520px);
+                min-width: 180px;
+                max-height: 20px;
+                accent-color: #fff;
+                height: 20px;
+                -webkit-appearance: none;
+                appearance: none;
+                writing-mode: horizontal-tb;
+                background: transparent;
+                -webkit-user-select: none;
+                user-select: none;
+                -webkit-touch-callout: none;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: none;
+            }
+            #sprite-gallery-scrubber::-webkit-slider-runnable-track {
+                height: 6px;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.45);
+            }
+            #sprite-gallery-scrubber::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 16px;
+                height: 16px;
+                margin-top: -6px;
+                border-radius: 50%;
+                border: 1px solid rgba(0,0,0,0.55);
+                background: #fff;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            }
+            #sprite-gallery-scrubber::-moz-range-track {
+                height: 6px;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.45);
+            }
+            #sprite-gallery-scrubber::-moz-range-thumb {
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                border: 1px solid rgba(0,0,0,0.55);
+                background: #fff;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            }
+            #sprite-gallery-debug {
+                width: min(100%, 760px);
+                border-radius: 12px;
+                background: rgba(8,8,8,0.9);
+                border: 1px solid rgba(255,255,255,0.12);
+                box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+                color: #f3f0de;
+                font-family: monospace;
+                font-size: 12px;
+                overflow: hidden;
+            }
+            #sprite-gallery-debug summary {
+                cursor: pointer;
+                list-style: none;
+                padding: 8px 10px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                background: rgba(255,255,255,0.06);
+                color: #f8e6a6;
+            }
+            #sprite-gallery-debug summary::-webkit-details-marker {
+                display: none;
+            }
+            #sprite-gallery-debug-output {
+                margin: 0;
+                padding: 10px;
+                max-height: 180px;
+                overflow: auto;
+                white-space: pre-wrap;
+                word-break: break-word;
+                line-height: 1.45;
+            }
+            #sprite-gallery-frame:fullscreen,
+            #sprite-gallery-frame:-webkit-full-screen,
+            #sprite-gallery-frame:-moz-full-screen,
+            #sprite-gallery-frame:-ms-fullscreen {
+                width: 100vw;
+                height: 100vh;
+                background: #000;
+            }
+            #sprite-gallery-frame.gallery-pseudo-fullscreen {
+                width: 100vw;
+                height: 100vh;
+                background: #000;
+            }
+            @media (max-width: 767px) {
+                #sprite-gallery-debug {
+                    display: none;
+                }
+                #sprite-gallery-controls {
+                    padding: 12px;
+                }
+                .sprite-gallery-controls-row.top {
+                    left: 12px;
+                    right: 12px;
+                }
+                .sprite-gallery-controls-row.bottom {
+                    bottom: calc(var(--gallery-controls-offset, 0px) + 10px);
+                    width: calc(100% - 24px);
+                }
+                .sprite-gallery-jumps {
+                    justify-content: center;
+                    width: 100%;
+                }
+                .sprite-gallery-actions {
+                    width: auto;
+                    justify-content: flex-end;
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-controls {
+                    padding: 16px 20px;
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-controls-row.bottom {
+                    bottom: 12px;
+                    width: auto;
+                    max-width: calc(100% - 40px);
+                    gap: 8px;
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-jumps {
+                    width: auto;
+                    max-width: 100%;
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-scrubber {
+                    width: min(100%, 280px);
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-action-btn,
+                #sprite-gallery-frame.gallery-mobile-fullscreen .sprite-gallery-jump-btn,
+                #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-time {
+                    font-size: 13px !important;
+                    padding: 6px 10px;
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-debug {
+                    display: none;
+                }
+                #sprite-gallery-frame.gallery-mobile-fullscreen #sprite-gallery-img {
+                    width: 100dvw;
+                    height: 100dvh;
+                    max-width: 100dvw;
+                    max-height: 100dvh;
+                    object-fit: contain;
+                    object-position: center center;
+                }
+            }
         `;
         document.head.appendChild(style);
     }
@@ -146,7 +771,7 @@
                 defaultActiveMode = getDefaultActiveMode(settings);
             }
         } catch (e) {
-            console.warn('SpriteTab: Could not load plugin settings, using defaults', e);
+            console.warn('[SpriteTab] Could not load plugin settings, using defaults', e);
         }
         return pluginSettings;
     }
@@ -164,9 +789,6 @@
 
     // --- UI RENDERER ---
     function renderControls(container, updateCallback) {
-        // Hide toolbar if grid_columns is configured in plugin settings
-        if (pluginSettings.grid_columns) return null;
-
         const settings = getSettings();
         const bar = document.createElement('div');
 
@@ -183,21 +805,24 @@
             backdrop-filter: blur(5px);
         `;
 
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.min = '1';
-        slider.max = '12';
-        slider.value = 13 - settings.cols;
-        slider.style.cssText = 'cursor: pointer; width: 100%;';
+        // Slider only when grid_columns is not configured in plugin settings
+        if (!pluginSettings.grid_columns) {
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = '1';
+            slider.max = '12';
+            slider.value = 13 - settings.cols;
+            slider.style.cssText = 'cursor: pointer; width: 100%;';
 
-        slider.oninput = (e) => {
-            const newVal = parseInt(e.target.value);
-            const newCols = 13 - newVal;
-            saveSettings({ cols: newCols });
-            updateCallback('cols');
-        };
+            slider.oninput = (e) => {
+                const newVal = parseInt(e.target.value);
+                const newCols = 13 - newVal;
+                saveSettings({ cols: newCols });
+                updateCallback('cols');
+            };
 
-        bar.appendChild(slider);
+            bar.appendChild(slider);
+        }
 
         return bar;
     }
@@ -208,18 +833,7 @@
         const mainContainer = document.createElement('div');
         mainContainer.style.cssText = "width: 100%; display: flex; flex-direction: column;";
 
-        // Create or get the preview box
-        let previewBox = document.getElementById('stash-sprite-preview');
-        if (!previewBox) {
-            previewBox = document.createElement('div');
-            previewBox.id = 'stash-sprite-preview';
-            // Add a time display inside the preview
-            const timeDisplay = document.createElement('div');
-            timeDisplay.className = 'preview-time';
-            previewBox.appendChild(timeDisplay);
-            document.body.appendChild(previewBox);
-        }
-        const previewTimeDisplay = previewBox.querySelector('.preview-time');
+        const previewBox = getSpritePreviewBox();
 
         const scrollArea = document.createElement('div');
         scrollArea.className = 'sprite-scroll-area';
@@ -310,6 +924,7 @@
                 cell.style.backgroundPosition = bgPos;
 
                 const time = (i / totalSpritesCount) * sceneData.duration;
+                const seekTime = getSpriteSelectionTime(i, totalSpritesCount, sceneData.duration);
                 const timeStr = formatTime(time);
 
                 if (pluginSettings.show_timestamps) {
@@ -324,15 +939,7 @@
                 const showTooltip = (clientX, clientY, bgPosOverride, timeStrOverride) => {
                     if (!pluginSettings.tooltip_enabled) return;
 
-                    previewBox.style.backgroundImage = `url('${sceneData.paths.sprite}')`;
-                    previewBox.style.backgroundSize = `${sourceCols * 100}%`;
-                    previewBox.style.backgroundPosition = bgPosOverride !== undefined ? bgPosOverride : bgPos;
-                    previewTimeDisplay.innerText = timeStrOverride !== undefined ? timeStrOverride : timeStr;
-
-                    // Calculate tooltip dimensions (use fixed aspect ratio since we know it)
-                    const tooltipWidth = pluginSettings.tooltip_width;
-                    const tooltipHeight = tooltipWidth * (9 / 16);
-
+                    const { width: tooltipWidth, height: tooltipHeight } = getSpritePreviewDimensions();
                     const vpWidth = window.innerWidth;
                     const vpHeight = window.innerHeight;
                     const offset = 20;
@@ -360,24 +967,37 @@
                         top = edgePadding;
                     }
 
-                    previewBox.style.top = `${top}px`;
-                    previewBox.style.left = `${left}px`;
-                    previewBox.style.display = 'block';
+                    previewBox.style.width = `${tooltipWidth}px`;
+                    showSpritePreview({
+                        backgroundImage: `url('${sceneData.paths.sprite}')`,
+                        backgroundSize: `${sourceCols * 100}%`,
+                        backgroundPosition: bgPosOverride !== undefined ? bgPosOverride : bgPos,
+                        timeText: timeStrOverride !== undefined ? timeStrOverride : timeStr
+                    }, { left, top });
                 };
 
                 const hideTooltip = () => {
-                    previewBox.style.display = 'none';
+                    hideSpritePreview();
                 };
 
                 const seekToTime = () => {
-                    const p = getPlayer();
-                    if (p) { p.currentTime = time; p.play(); }
+                    const controller = getPlaybackController();
+                    if (!controller) return;
+                    setControllerTime(controller, seekTime);
+                    playController(controller);
                 };
+
+                cell.dataset.seekTime = String(seekTime);
 
                 // --- CLICK HANDLER (desktop) ---
                 cell.onclick = (e) => {
                     // Ignore clicks that are synthetic from touch events
                     if (Date.now() - lastTouchTime < 500) return;
+                    const ev = new CustomEvent('spritetab:cellactivate', {
+                        bubbles: true, cancelable: true,
+                        detail: { time: seekTime, sceneId: currentSceneId }
+                    });
+                    if (!cell.dispatchEvent(ev)) return;
                     seekToTime();
                 };
 
@@ -487,11 +1107,17 @@
                         return;
                     }
 
-                    // Short tap without scrolling - seek to time, then scroll to player
-                    seekToTime();
-                    if (pluginSettings.auto_scroll && isMobileLayout()) {
-                        const player = getPlayer();
-                        if (player) player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Short tap without scrolling
+                    const ev = new CustomEvent('spritetab:cellactivate', {
+                        bubbles: true, cancelable: true,
+                        detail: { time: seekTime, sceneId: currentSceneId }
+                    });
+                    if (cell.dispatchEvent(ev)) {
+                        seekToTime();
+                        if (pluginSettings.auto_scroll && isMobileLayout()) {
+                            const player = getPlayer();
+                            if (player) player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
                     }
                     touchStartPos = null;
                 };
@@ -527,6 +1153,7 @@
     function attachVideoListeners(cells, duration) {
         let currentActiveIndex = -1;
         const total = cells.length;
+        let boundPlayer = null;
 
         const update = () => {
             const player = getPlayer();
@@ -557,11 +1184,19 @@
             }
         };
 
-        const poller = setInterval(() => {
+        const bindPlayer = () => {
             const player = getPlayer();
-            if (player) {
-                player.addEventListener('timeupdate', update);
-                update();
+            if (!player || player === boundPlayer) return false;
+            player.addEventListener('timeupdate', update);
+            update();
+            boundPlayer = player;
+            return true;
+        };
+
+        if (bindPlayer()) return;
+
+        const poller = setInterval(() => {
+            if (bindPlayer()) {
                 clearInterval(poller);
             }
         }, 1000);
@@ -579,6 +1214,8 @@
             const toolbarGroups = document.querySelectorAll('.scene-toolbar-group');
             if (toolbarGroups.length === 0) return;
             const toolbar = toolbarGroups[toolbarGroups.length - 1];
+
+            currentSceneId = sceneId;
 
             // Load plugin settings first
             await loadPluginSettings();
@@ -734,9 +1371,8 @@
                 init(match[1]);
             }
         } else {
-            // Cleanup popup if leaving scene page
-            const popup = document.getElementById('stash-sprite-preview');
-            if (popup) popup.remove();
+            // Cleanup when leaving scene page
+            currentSceneId = null;
             spritesVisible = false;
         }
     });
