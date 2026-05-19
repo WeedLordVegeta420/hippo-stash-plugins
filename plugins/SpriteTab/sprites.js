@@ -8,6 +8,8 @@
     const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
     const DEFAULTS = { cols: 4 };
     const VALID_DEFAULT_ACTIVE_MODES = ['remember', 'always_on', 'always_off'];
+    const SPRITE_WIDTH_GUESS = 160;
+    const MAX_VTT_RETRIES = 30; // up to 30 retries at 100ms each after the initial check
 
     // Plugin settings cache
     let pluginSettings = {
@@ -270,32 +272,53 @@
         mainContainer.appendChild(scrollArea);
 
         const img = new Image();
-        img.src = sceneData.paths.sprite;
-        const loadSprites = () => {
-            // Get thumbnail data from vjs player.
+        const loadSprites = (attempts = 0) => {
             const vjsElem = document.getElementById("VideoJsPlayer");
             const vjsPlayer = vjsElem ? vjsElem.player : null;
-            const vttData = vjsPlayer ? vjsPlayer.vttThumbnails().vttData : null;
-            if (!vttData) {
-                // If VTT data is not available yet, wait and try again.
-                setTimeout(loadSprites, 100);
+            let vttData = null;
+            if (vjsPlayer && typeof vjsPlayer.vttThumbnails === 'function') {
+                try {
+                    const raw = vjsPlayer.vttThumbnails().vttData;
+                    vttData = Array.isArray(raw) && raw.length > 0 ? raw : null;
+                } catch (_) {
+                    vttData = null;
+                }
+            }
+
+            if (!vttData && attempts < MAX_VTT_RETRIES) {
+                setTimeout(() => loadSprites(attempts + 1), 100);
                 return;
             }
 
-            // Get h/w and rows/cols based on thumbnail size from VTT.
-            const thumbW = vttData[0].style.width.replace("px","");
-            const thumbH = vttData[0].style.height.replace("px","");
             const sourceW = img.naturalWidth;
             const sourceH = img.naturalHeight;
-            const sourceCols = Math.round(sourceW / thumbW);
-            const sourceRows = Math.round(sourceH / thumbH);
-            totalSpritesCount = vttData.length;
+            let sourceCols;
+            let sourceRows;
+
+            if (vttData) {
+                const thumbW = parseInt(vttData[0].style.width, 10);
+                const thumbH = parseInt(vttData[0].style.height, 10);
+                if (Number.isFinite(thumbW) && thumbW > 0 && Number.isFinite(thumbH) && thumbH > 0) {
+                    sourceCols = Math.round(sourceW / thumbW);
+                    sourceRows = Math.round(sourceH / thumbH);
+                    totalSpritesCount = vttData.length;
+                } else {
+                    vttData = null;
+                }
+            }
+
+            if (!vttData) {
+                // Legacy fallback: assumes 16:9 thumbnails, incorrect for portrait.
+                sourceCols = Math.round(sourceW / SPRITE_WIDTH_GUESS);
+                const singleH = (sourceW / sourceCols) * (9 / 16);
+                sourceRows = Math.round(sourceH / singleH);
+                totalSpritesCount = sourceCols * sourceRows;
+            }
 
             // Shared across all cells so any touch blocks synthetic mouse events on all cells
             let lastTouchTime = 0;
 
             for (let i = 0; i < totalSpritesCount; i++) {
-                const vtt = vttData[i];
                 const cell = document.createElement('div');
                 cell.className = 'sprite-cell';
                 cell.style.cssText = `width: 100%; aspect-ratio: 16/9; background-image: url('${sceneData.paths.sprite}'); background-repeat: no-repeat; cursor: pointer; position: relative;`;
@@ -518,7 +541,8 @@
             attachVideoListeners(cells, sceneData.duration);
         };
 
-        img.onload = loadSprites;
+        img.onload = () => loadSprites();
+        img.src = sceneData.paths.sprite;
 
         return mainContainer;
     }
@@ -531,7 +555,9 @@
             const player = getPlayer();
             if (!player) return;
 
-            const idx = Math.floor((player.currentTime / duration) * total);
+            // Round (not floor): post-seek currentTime can land a few ms short
+            // of the requested target, which would otherwise floor to the previous sprite.
+            const idx = Math.round((player.currentTime / duration) * total);
             const safeIdx = Math.max(0, Math.min(idx, total - 1));
 
             if (safeIdx !== currentActiveIndex) {

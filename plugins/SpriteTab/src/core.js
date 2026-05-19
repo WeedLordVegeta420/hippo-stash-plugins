@@ -6,7 +6,6 @@
 const STORAGE_KEY = 'stash_plugin_sprite_settings';
 const PLUGIN_ID = 'SpriteTab';
 const DEFAULT_PREVIEW_WIDTH = 300;
-const SPRITE_WIDTH_GUESS = 160;
 const DEFAULTS = { cols: 0, showTime: true, compact: false, autoScroll: true };
 const VALID_DEFAULT_ACTIVE_MODES = ['remember', 'always_on', 'always_off'];
 
@@ -126,18 +125,32 @@ function isSyntheticMouseEvent(lastTouchTime, currentTime = Date.now(), threshol
 }
 
 /**
- * Calculate sprite grid dimensions from image
+ * Parse thumbnail dimensions from a Video.js vttThumbnails track.
+ * @param {Array} vttData - vttData array from vjsPlayer.vttThumbnails()
+ * @returns {{thumbWidth: number, thumbHeight: number}|null} Dimensions, or null if unparseable
+ */
+function parseVttDimensions(vttData) {
+    if (!vttData || !vttData[0] || !vttData[0].style) return null;
+    const thumbWidth = parseInt(vttData[0].style.width, 10);
+    const thumbHeight = parseInt(vttData[0].style.height, 10);
+    if (!Number.isFinite(thumbWidth) || thumbWidth <= 0) return null;
+    if (!Number.isFinite(thumbHeight) || thumbHeight <= 0) return null;
+    return { thumbWidth, thumbHeight };
+}
+
+/**
+ * Calculate sprite grid dimensions from sheet and thumbnail sizes.
  * @param {number} imageWidth - Natural width of sprite sheet
  * @param {number} imageHeight - Natural height of sprite sheet
- * @param {number} spriteWidthGuess - Estimated width of single sprite (default 160)
- * @returns {object} Grid info { cols, rows, totalSprites, singleHeight }
+ * @param {number} thumbWidth - Width of a single thumbnail (from VTT track)
+ * @param {number} thumbHeight - Height of a single thumbnail (from VTT track)
+ * @returns {{cols: number, rows: number}}
  */
-function calculateSpriteGrid(imageWidth, imageHeight, spriteWidthGuess = SPRITE_WIDTH_GUESS) {
-    const cols = Math.round(imageWidth / spriteWidthGuess);
-    const singleHeight = (imageWidth / cols) * (9 / 16);
-    const rows = Math.round(imageHeight / singleHeight);
-    const totalSprites = cols * rows;
-    return { cols, rows, totalSprites, singleHeight };
+function calculateSpriteGrid(imageWidth, imageHeight, thumbWidth, thumbHeight) {
+    return {
+        cols: Math.round(imageWidth / thumbWidth),
+        rows: Math.round(imageHeight / thumbHeight)
+    };
 }
 
 /**
@@ -164,6 +177,20 @@ function calculateSpritePosition(index, cols, rows) {
  */
 function calculateSpriteTime(index, totalSprites, duration) {
     return (index / totalSprites) * duration;
+}
+
+/**
+ * Inverse of calculateSpriteTime: determine which sprite is active for a given
+ * playback time. Rounds to the nearest sprite so a few-millisecond shortfall
+ * after a seek doesn't push the highlight to the previous sprite.
+ * @param {number} currentTime - Playback time in seconds
+ * @param {number} totalSprites - Total number of sprites
+ * @param {number} duration - Video duration in seconds
+ * @returns {number} Active sprite index, clamped to [0, totalSprites - 1]
+ */
+function getActiveSpriteIndex(currentTime, totalSprites, duration) {
+    const idx = Math.round((currentTime / duration) * totalSprites);
+    return Math.max(0, Math.min(idx, totalSprites - 1));
 }
 
 /**
@@ -258,7 +285,6 @@ if (typeof module !== 'undefined' && module.exports) {
         STORAGE_KEY,
         PLUGIN_ID,
         DEFAULT_PREVIEW_WIDTH,
-        SPRITE_WIDTH_GUESS,
         DEFAULTS,
         formatTime,
         getSettings,
@@ -267,9 +293,11 @@ if (typeof module !== 'undefined' && module.exports) {
         isScrollGesture,
         isSyntheticMouseEvent,
         isMobileLayout,
+        parseVttDimensions,
         calculateSpriteGrid,
         calculateSpritePosition,
         calculateSpriteTime,
+        getActiveSpriteIndex,
         parsePluginSettings,
         parseSceneData,
         extractSceneId,
