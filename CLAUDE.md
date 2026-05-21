@@ -32,13 +32,13 @@ Tests require 100% coverage for functions, lines, and statements, with 80% branc
 
 ## Architecture
 
-**Core separation pattern**: Testable utility functions live in `src/core.js`, while DOM manipulation and Stash API integration live in the main plugin file (`sprites.js`).
+**Core separation pattern**: Pure utilities live in `core.js`, exposed at `window.SpriteTabCore` in the browser and via `module.exports` for Jest. `sprites.js` destructures what it needs from `SpriteTabCore` at the top of its IIFE — there is one shared implementation, not parallel copies. The yml loads `core.js` before `sprites.js` so the global is in place when `sprites.js` runs; reordering breaks the destructure.
 
 ### plugins/SpriteTab/
 
-- **sprites.js** - Main plugin entry point. Handles DOM rendering, event listeners, GraphQL queries to Stash API, and plugin lifecycle. Contains configuration constants and initialization logic with race condition prevention.
+- **sprites.js** - Main plugin entry point. Handles DOM rendering, event listeners, GraphQL queries to Stash API, and plugin lifecycle. Contains configuration constants and initialization logic with race condition prevention. Consumes pure utilities from `window.SpriteTabCore` rather than reimplementing them.
 
-- **src/core.js** - Pure utility functions extracted for testability: time formatting, settings management (localStorage), tooltip positioning with viewport bounds checking, sprite grid calculations, URL/GraphQL parsing helpers, and mobile layout detection (`isMobileLayout`).
+- **core.js** - Shared pure utilities, loaded before `sprites.js` per the manifest. Time formatting, settings (localStorage), tooltip positioning with viewport bounds, sprite grid + VTT cue parsing, active-sprite index calculation, URL/GraphQL parsing helpers, mobile layout detection. Wrapped in an IIFE that publishes its API to `window.SpriteTabCore` (browser) and `module.exports` (Jest).
 
 - **SpriteTab.yml** - Plugin manifest defining metadata and user-configurable settings: `tooltip_enabled`, `tooltip_width`, `show_timestamps`, `compact_view`, `auto_scroll`, `grid_columns`.
 
@@ -57,5 +57,5 @@ Several non-obvious invariants must be preserved:
 
 - **`lastTouchTime` is shared across all sprite cells** (declared once before the cell loop, not inside it). Per-cell timestamps would fail to block synthetic `mouseenter` events fired on neighbouring cells after a finger lift.
 - **`isLongPress` gates scroll detection in `ontouchmove`**: when a long press is active the handler returns early, before any scroll-detection code runs. This allows the tooltip to follow the finger across cells. Do not move the scroll-detection block above the `isLongPress` check.
-- **Mobile layout is detected via media query** (`window.matchMedia('(max-width: 767px)')`), not by touch capability. Tablets may have their own scroll containers and should behave like desktop. `isMobileLayout()` in `src/core.js` accepts an injectable `matchMediaFn` for testability.
+- **Mobile layout is detected via media query** (`window.matchMedia('(max-width: 767px)')`), not by touch capability. Tablets may have their own scroll containers and should behave like desktop. `isMobileLayout()` in `core.js` accepts an injectable `matchMediaFn` for testability.
 - **Auto-scroll during playback is suppressed on mobile** to avoid hijacking the page scroll. On mobile, tapping a sprite seeks the video and (if auto-scroll is enabled) scrolls the player back into view instead.

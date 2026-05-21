@@ -1,11 +1,23 @@
 (function () {
     'use strict';
 
-    // --- CONFIGURATION ---
-    const STORAGE_KEY = 'stash_plugin_sprite_settings';
-    const PLUGIN_ID = 'SpriteTab';
-    const DEFAULT_PREVIEW_WIDTH = 300; // Default size of the magnified pop-up in pixels
-    const DEFAULTS = { cols: 4 };
+    // Pure utilities live in core.js (loaded by SpriteTab.yml before this file).
+    // See __tests__/core.test.js for the canonical specs.
+    const {
+        PLUGIN_ID,
+        DEFAULT_PREVIEW_WIDTH,
+        formatTime,
+        getSettings,
+        saveSettings,
+        isMobileLayout,
+        getActiveSpriteIndex,
+        getDefaultActiveMode,
+    } = window.SpriteTabCore;
+
+    // sprites.js-only constants
+    const TAB_STATE_STORAGE_KEY = 'sprites_tab_state';
+    const SPRITE_WIDTH_GUESS = 160;
+    const MAX_VTT_RETRIES = 30; // up to 30 retries at 100ms each after the initial check
 
     // Plugin settings cache
     let pluginSettings = {
@@ -17,6 +29,9 @@
         grid_columns: null
     };
 
+    // Default-active mode (overwritten after settings load)
+    let defaultActiveMode = 'remember';
+
     // Initialization state to prevent race conditions
     let isInitializing = false;
 
@@ -27,34 +42,8 @@
     let spritesVisible = false;
 
     // --- HELPERS ---
-    function getSettings() {
-        try {
-            return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORAGE_KEY)) };
-        } catch (e) { return DEFAULTS; }
-    }
-
-    function saveSettings(newSettings) {
-        const merged = { ...getSettings(), ...newSettings };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-        return merged;
-    }
-
-    function formatTime(seconds) {
-        if (!seconds) return "0:00";
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
-        return h > 0
-            ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-            : `${m}:${s.toString().padStart(2, '0')}`;
-    }
-
     function getPlayer() {
         return document.querySelector('video.vjs-tech') || document.querySelector('video');
-    }
-
-    function isMobileLayout() {
-        return window.matchMedia('(max-width: 767px)').matches;
     }
 
     // --- INJECT CUSTOM STYLES ---
@@ -124,8 +113,25 @@
         return json.data;
     }
 
+    function getSavedSpritesTabState() {
+        try {
+            return localStorage.getItem(TAB_STATE_STORAGE_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setSavedSpritesTabState(enabled) {
+        try {
+            localStorage.setItem(TAB_STATE_STORAGE_KEY, enabled ? 'true' : 'false');
+        } catch (e) {
+            // Storage unavailable
+        }
+    }
+
     async function loadPluginSettings() {
         const query = `query Configuration { configuration { plugins } }`;
+        defaultActiveMode = 'remember';
         try {
             const data = await stashGQL(query);
             const allPlugins = data?.configuration?.plugins;
@@ -137,6 +143,7 @@
                 pluginSettings.compact_view = settings.compact_view ?? false;
                 pluginSettings.auto_scroll = settings.auto_scroll ?? true;
                 pluginSettings.grid_columns = settings.grid_columns ?? null;
+                defaultActiveMode = getDefaultActiveMode(settings);
             }
         } catch (e) {
             console.warn('SpriteTab: Could not load plugin settings, using defaults', e);
@@ -242,32 +249,53 @@
         mainContainer.appendChild(scrollArea);
 
         const img = new Image();
-        img.src = sceneData.paths.sprite;
-        const loadSprites = () => {
-            // Get thumbnail data from vjs player.
+        const loadSprites = (attempts = 0) => {
             const vjsElem = document.getElementById("VideoJsPlayer");
             const vjsPlayer = vjsElem ? vjsElem.player : null;
-            const vttData = vjsPlayer ? vjsPlayer.vttThumbnails().vttData : null;
-            if (!vttData) {
-                // If VTT data is not available yet, wait and try again.
-                setTimeout(loadSprites, 100);
+            let vttData = null;
+            if (vjsPlayer && typeof vjsPlayer.vttThumbnails === 'function') {
+                try {
+                    const raw = vjsPlayer.vttThumbnails().vttData;
+                    vttData = Array.isArray(raw) && raw.length > 0 ? raw : null;
+                } catch (_) {
+                    vttData = null;
+                }
+            }
+
+            if (!vttData && attempts < MAX_VTT_RETRIES) {
+                setTimeout(() => loadSprites(attempts + 1), 100);
                 return;
             }
 
-            // Get h/w and rows/cols based on thumbnail size from VTT.
-            const thumbW = vttData[0].style.width.replace("px","");
-            const thumbH = vttData[0].style.height.replace("px","");
             const sourceW = img.naturalWidth;
             const sourceH = img.naturalHeight;
-            const sourceCols = Math.round(sourceW / thumbW);
-            const sourceRows = Math.round(sourceH / thumbH);
-            totalSpritesCount = vttData.length;
+            let sourceCols;
+            let sourceRows;
+
+            if (vttData) {
+                const thumbW = parseInt(vttData[0].style.width, 10);
+                const thumbH = parseInt(vttData[0].style.height, 10);
+                if (Number.isFinite(thumbW) && thumbW > 0 && Number.isFinite(thumbH) && thumbH > 0) {
+                    sourceCols = Math.round(sourceW / thumbW);
+                    sourceRows = Math.round(sourceH / thumbH);
+                    totalSpritesCount = vttData.length;
+                } else {
+                    vttData = null;
+                }
+            }
+
+            if (!vttData) {
+                // Legacy fallback: assumes 16:9 thumbnails, incorrect for portrait.
+                sourceCols = Math.round(sourceW / SPRITE_WIDTH_GUESS);
+                const singleH = (sourceW / sourceCols) * (9 / 16);
+                sourceRows = Math.round(sourceH / singleH);
+                totalSpritesCount = sourceCols * sourceRows;
+            }
 
             // Shared across all cells so any touch blocks synthetic mouse events on all cells
             let lastTouchTime = 0;
 
             for (let i = 0; i < totalSpritesCount; i++) {
-                const vtt = vttData[i];
                 const cell = document.createElement('div');
                 cell.className = 'sprite-cell';
                 cell.style.cssText = `width: 100%; aspect-ratio: 16/9; background-image: url('${sceneData.paths.sprite}'); background-repeat: no-repeat; cursor: pointer; position: relative;`;
@@ -490,7 +518,8 @@
             attachVideoListeners(cells, sceneData.duration);
         };
 
-        img.onload = loadSprites;
+        img.onload = () => loadSprites();
+        img.src = sceneData.paths.sprite;
 
         return mainContainer;
     }
@@ -503,8 +532,7 @@
             const player = getPlayer();
             if (!player) return;
 
-            const idx = Math.floor((player.currentTime / duration) * total);
-            const safeIdx = Math.max(0, Math.min(idx, total - 1));
+            const safeIdx = getActiveSpriteIndex(player.currentTime, total, duration);
 
             if (safeIdx !== currentActiveIndex) {
                 if (currentActiveIndex >= 0 && cells[currentActiveIndex]) {
@@ -615,35 +643,50 @@
                 }
             };
 
-            // Toggle sprites panel visibility
+            // Show the sprites panel. Programmatic activation (from
+            // applyInitialState) deliberately does NOT persist to localStorage;
+            // only an explicit user toggle should overwrite the saved state.
+            const activateSprites = async () => {
+                if (spritesVisible) return;
+                spritesVisible = true;
+
+                // Reload settings in case they changed
+                await rebuildPanel();
+
+                // Deactivate other tabs and activate sprites
+                if (navTabs) {
+                    navTabs.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+                }
+                tabContent.classList.add('stash-plugin-sprites-active');
+                btn.classList.add('sprites-active');
+
+                if (pluginSettings.auto_scroll) {
+                    const activeCell = tabPane.querySelector('.sprite-cell[style*="box-shadow"]');
+                    if (activeCell) activeCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            };
+
+            const deactivateSprites = () => {
+                if (!spritesVisible) return;
+                spritesVisible = false;
+                tabContent.classList.remove('stash-plugin-sprites-active');
+                btn.classList.remove('sprites-active');
+
+                if (navTabs) {
+                    const firstTab = navTabs.querySelector('.nav-link');
+                    if (firstTab) firstTab.click();
+                }
+            };
+
+            // Toggle sprites panel visibility (user-initiated)
             const toggleSprites = async () => {
-                spritesVisible = !spritesVisible;
-
                 if (spritesVisible) {
-                    // Reload settings in case they changed
-                    await rebuildPanel();
-
-                    // Deactivate other tabs and activate sprites
-                    if (navTabs) {
-                        navTabs.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-                    }
-                    tabContent.classList.add('stash-plugin-sprites-active');
-                    btn.classList.add('sprites-active');
-
-                    if (pluginSettings.auto_scroll) {
-                        const activeCell = tabPane.querySelector('.sprite-cell[style*="box-shadow"]');
-                        if (activeCell) activeCell.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
+                    deactivateSprites();
                 } else {
-                    // Hide sprites panel and show the first tab
-                    tabContent.classList.remove('stash-plugin-sprites-active');
-                    btn.classList.remove('sprites-active');
-
-                    // Activate the first tab
-                    if (navTabs) {
-                        const firstTab = navTabs.querySelector('.nav-link');
-                        if (firstTab) firstTab.click();
-                    }
+                    await activateSprites();
+                }
+                if (defaultActiveMode === 'remember') {
+                    setSavedSpritesTabState(spritesVisible);
                 }
             };
 
@@ -654,11 +697,28 @@
                 navTabs.addEventListener('click', (e) => {
                     const link = e.target.closest('.nav-link');
                     if (link) {
+                        const wasVisible = spritesVisible;
                         spritesVisible = false;
                         tabContent.classList.remove('stash-plugin-sprites-active');
                         btn.classList.remove('sprites-active');
+                        if (wasVisible && defaultActiveMode === 'remember') {
+                            setSavedSpritesTabState(false);
+                        }
                     }
                 }, { capture: true });
+            }
+
+            // Apply the default-active mode now that the panel is built. Runs
+            // after init's await loadPluginSettings(), so defaultActiveMode is
+            // authoritative here.
+            if (/\/scenes\/\d+/.test(window.location.pathname)) {
+                if (defaultActiveMode === 'always_on') {
+                    activateSprites();
+                } else if (defaultActiveMode === 'always_off') {
+                    setSavedSpritesTabState(false);
+                } else if (getSavedSpritesTabState()) {
+                    activateSprites();
+                }
             }
         } finally {
             isInitializing = false;

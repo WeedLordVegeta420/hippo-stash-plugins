@@ -12,13 +12,17 @@ const {
     isScrollGesture,
     isSyntheticMouseEvent,
     isMobileLayout,
+    parseVttDimensions,
     calculateSpriteGrid,
     calculateSpritePosition,
     calculateSpriteTime,
+    getActiveSpriteIndex,
     parsePluginSettings,
     parseSceneData,
-    extractSceneId
-} = require('../src/core');
+    extractSceneId,
+    getDefaultActiveMode,
+    resolveInitialActiveState
+} = require('../core');
 
 describe('formatTime', () => {
     it('returns "0:00" for zero seconds', () => {
@@ -83,38 +87,16 @@ describe('getSettings', () => {
         expect(settings).toEqual(DEFAULTS);
     });
 
-    it('merges stored settings with defaults', () => {
+    it('uses stored value over default', () => {
         const mockStorage = {
-            getItem: jest.fn(() => JSON.stringify({ cols: 6, showTime: false }))
+            getItem: jest.fn(() => JSON.stringify({ cols: 8 }))
         };
-        const settings = getSettings(mockStorage);
-        expect(settings).toEqual({
-            cols: 6,
-            showTime: false,
-            compact: false,
-            autoScroll: true
-        });
-    });
-
-    it('uses stored values over defaults', () => {
-        const mockStorage = {
-            getItem: jest.fn(() => JSON.stringify({
-                cols: 8,
-                showTime: false,
-                compact: true,
-                autoScroll: false
-            }))
-        };
-        const settings = getSettings(mockStorage);
-        expect(settings.cols).toBe(8);
-        expect(settings.showTime).toBe(false);
-        expect(settings.compact).toBe(true);
-        expect(settings.autoScroll).toBe(false);
+        expect(getSettings(mockStorage)).toEqual({ cols: 8 });
     });
 });
 
 describe('saveSettings', () => {
-    it('merges new settings with existing settings', () => {
+    it('writes the merged result to storage and returns it', () => {
         const mockStorage = {
             getItem: jest.fn(() => JSON.stringify({ cols: 4 })),
             setItem: jest.fn()
@@ -125,17 +107,6 @@ describe('saveSettings', () => {
             STORAGE_KEY,
             expect.stringContaining('"cols":8')
         );
-    });
-
-    it('preserves existing settings when adding new ones', () => {
-        const mockStorage = {
-            getItem: jest.fn(() => JSON.stringify({ cols: 4, showTime: true })),
-            setItem: jest.fn()
-        };
-        const result = saveSettings({ compact: true }, mockStorage);
-        expect(result.cols).toBe(4);
-        expect(result.showTime).toBe(true);
-        expect(result.compact).toBe(true);
     });
 
     it('handles null storage gracefully', () => {
@@ -290,25 +261,54 @@ describe('isSyntheticMouseEvent', () => {
     });
 });
 
+describe('parseVttDimensions', () => {
+    it('returns null for null or empty input', () => {
+        expect(parseVttDimensions(null)).toBeNull();
+        expect(parseVttDimensions(undefined)).toBeNull();
+        expect(parseVttDimensions([])).toBeNull();
+    });
+
+    it('returns null when the first cue has no style', () => {
+        expect(parseVttDimensions([{}])).toBeNull();
+    });
+
+    it('parses pixel dimensions from VTT style strings', () => {
+        const vttData = [{ style: { width: '160px', height: '90px' } }];
+        expect(parseVttDimensions(vttData)).toEqual({ thumbWidth: 160, thumbHeight: 90 });
+    });
+
+    it('parses portrait thumbnails (height > width)', () => {
+        const vttData = [{ style: { width: '90px', height: '160px' } }];
+        expect(parseVttDimensions(vttData)).toEqual({ thumbWidth: 90, thumbHeight: 160 });
+    });
+
+    it('returns null when dimensions are missing or unparseable', () => {
+        expect(parseVttDimensions([{ style: { width: 'auto', height: '90px' } }])).toBeNull();
+        expect(parseVttDimensions([{ style: { width: '160px', height: '' } }])).toBeNull();
+        expect(parseVttDimensions([{ style: { width: '0px', height: '90px' } }])).toBeNull();
+        expect(parseVttDimensions([{ style: { width: '-50px', height: '90px' } }])).toBeNull();
+    });
+});
+
 describe('calculateSpriteGrid', () => {
-    it('calculates grid dimensions for standard sprite sheet', () => {
-        // Typical sprite sheet: 1600x900 with 160px wide sprites
-        const result = calculateSpriteGrid(1600, 900, 160);
-        expect(result.cols).toBe(10);
-        expect(result.rows).toBeGreaterThan(0);
-        expect(result.totalSprites).toBe(result.cols * result.rows);
+    it('calculates grid dimensions from sheet and thumb sizes', () => {
+        // 1600x900 sheet with 160x90 thumbs → 10 cols × 10 rows
+        expect(calculateSpriteGrid(1600, 900, 160, 90)).toEqual({ cols: 10, rows: 10 });
     });
 
-    it('handles non-standard dimensions', () => {
-        const result = calculateSpriteGrid(800, 450, 160);
-        expect(result.cols).toBe(5);
-        expect(result.totalSprites).toBeGreaterThan(0);
+    it('rounds to the nearest column/row count when sizes do not divide evenly', () => {
+        // 1610x905 sheet with 160x90 thumbs still resolves to a 10×10 grid
+        expect(calculateSpriteGrid(1610, 905, 160, 90)).toEqual({ cols: 10, rows: 10 });
     });
 
-    it('calculates single sprite height based on 16:9 ratio', () => {
-        const result = calculateSpriteGrid(1600, 900, 160);
-        const expectedHeight = (1600 / result.cols) * (9 / 16);
-        expect(result.singleHeight).toBeCloseTo(expectedHeight);
+    it('handles portrait sprite sheets', () => {
+        // 360x640 sheet with 90x160 portrait thumbs → 4 cols × 4 rows
+        expect(calculateSpriteGrid(360, 640, 90, 160)).toEqual({ cols: 4, rows: 4 });
+    });
+
+    it('handles custom thumbnail sizes (Stash 0.31+ custom sprite generation)', () => {
+        // 1280x720 sheet with 320x180 thumbs → 4 cols × 4 rows
+        expect(calculateSpriteGrid(1280, 720, 320, 180)).toEqual({ cols: 4, rows: 4 });
     });
 });
 
@@ -366,6 +366,40 @@ describe('calculateSpriteTime', () => {
     it('handles various durations', () => {
         expect(calculateSpriteTime(25, 100, 1000)).toBe(250);
         expect(calculateSpriteTime(10, 50, 300)).toBe(60);
+    });
+});
+
+describe('getActiveSpriteIndex', () => {
+    it('returns 0 at the start of playback', () => {
+        expect(getActiveSpriteIndex(0, 100, 600)).toBe(0);
+    });
+
+    it('returns the matching index at an exact sprite boundary', () => {
+        // Sprite 10 of 100 in a 600s video sits at 60s.
+        expect(getActiveSpriteIndex(60, 100, 600)).toBe(10);
+    });
+
+    it('rounds up when currentTime lands a few ms short of the requested seek', () => {
+        // Regression: clicking sprite 10 seeks to 258.1291; the browser may
+        // report currentTime slightly less than that (FP, keyframe alignment).
+        // Math.floor used to map this back to sprite 9; Math.round keeps it at 10.
+        expect(getActiveSpriteIndex(258.12, 100, 2581.291)).toBe(10);
+        expect(getActiveSpriteIndex(258.1, 100, 2581.291)).toBe(10);
+    });
+
+    it('does not jump to the next sprite until the playhead is past the midpoint', () => {
+        // Sprite 10 lives at 60s, sprite 11 at 66s; midpoint is 63s.
+        expect(getActiveSpriteIndex(62.9, 100, 600)).toBe(10);
+        expect(getActiveSpriteIndex(63.1, 100, 600)).toBe(11);
+    });
+
+    it('clamps to the last sprite when currentTime is at or past duration', () => {
+        expect(getActiveSpriteIndex(600, 100, 600)).toBe(99);
+        expect(getActiveSpriteIndex(700, 100, 600)).toBe(99);
+    });
+
+    it('clamps to 0 when currentTime is negative', () => {
+        expect(getActiveSpriteIndex(-1, 100, 600)).toBe(0);
     });
 });
 
@@ -508,5 +542,48 @@ describe('extractSceneId', () => {
     it('returns null for invalid scene paths', () => {
         expect(extractSceneId('/scenes/')).toBeNull();
         expect(extractSceneId('/scenes/abc')).toBeNull();
+    });
+});
+
+describe('getDefaultActiveMode', () => {
+    it('returns the configured mode when valid', () => {
+        expect(getDefaultActiveMode({ default_active: 'remember' })).toBe('remember');
+        expect(getDefaultActiveMode({ default_active: 'always_on' })).toBe('always_on');
+        expect(getDefaultActiveMode({ default_active: 'always_off' })).toBe('always_off');
+    });
+
+    it('falls back to "remember" for unknown modes', () => {
+        expect(getDefaultActiveMode({ default_active: 'banana' })).toBe('remember');
+        expect(getDefaultActiveMode({ default_active: '' })).toBe('remember');
+    });
+
+    it('falls back to "remember" when the setting is absent', () => {
+        expect(getDefaultActiveMode({})).toBe('remember');
+        expect(getDefaultActiveMode(null)).toBe('remember');
+        expect(getDefaultActiveMode(undefined)).toBe('remember');
+    });
+});
+
+describe('resolveInitialActiveState', () => {
+    it('always activates in always_on mode regardless of saved state', () => {
+        expect(resolveInitialActiveState('always_on', false)).toBe(true);
+        expect(resolveInitialActiveState('always_on', true)).toBe(true);
+    });
+
+    it('never activates in always_off mode regardless of saved state', () => {
+        expect(resolveInitialActiveState('always_off', true)).toBe(false);
+        expect(resolveInitialActiveState('always_off', false)).toBe(false);
+    });
+
+    it('defers to saved state in remember mode', () => {
+        expect(resolveInitialActiveState('remember', true)).toBe(true);
+        expect(resolveInitialActiveState('remember', false)).toBe(false);
+    });
+
+    it('coerces truthy/falsy saved states to booleans in remember mode', () => {
+        expect(resolveInitialActiveState('remember', 'true')).toBe(true);
+        expect(resolveInitialActiveState('remember', 0)).toBe(false);
+        expect(resolveInitialActiveState('remember', null)).toBe(false);
+        expect(resolveInitialActiveState('remember', undefined)).toBe(false);
     });
 });

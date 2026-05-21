@@ -8,7 +8,7 @@ const {
     isScrollGesture,
     isSyntheticMouseEvent,
     isMobileLayout
-} = require('../src/core');
+} = require('../core');
 
 describe('Touch and Mouse Event Integration', () => {
     describe('Touch-to-Mouse Event Filtering', () => {
