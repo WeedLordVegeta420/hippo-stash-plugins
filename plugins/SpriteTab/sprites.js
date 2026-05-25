@@ -41,173 +41,15 @@
     // Track if sprites panel is currently shown
     let spritesVisible = false;
 
-    // Scene ID of the currently viewed scene (set in init, cleared on navigation)
+    // Current scene id, mirrored from init(sceneId). Read by the cell
+    // activation handlers when dispatching `spritetab:cellactivate` so
+    // listeners (e.g. GalleryMode) know which scene the activation is
+    // for. Cleared when navigation leaves a scene page.
     let currentSceneId = null;
 
     // --- HELPERS ---
     function getPlayer() {
         return document.querySelector('video.vjs-tech') || document.querySelector('video');
-    }
-
-    function getSpritePreviewMountNode() {
-        return document.body;
-    }
-
-    function getSpritePreviewBox() {
-        let previewBox = document.getElementById('stash-sprite-preview');
-        if (!previewBox) {
-            previewBox = document.createElement('div');
-            previewBox.id = 'stash-sprite-preview';
-            const timeDisplay = document.createElement('div');
-            timeDisplay.className = 'preview-time';
-            previewBox.appendChild(timeDisplay);
-        }
-        const mountNode = getSpritePreviewMountNode();
-        if (previewBox.parentElement !== mountNode) {
-            mountNode.appendChild(previewBox);
-        }
-        return previewBox;
-    }
-
-    function hideSpritePreview() {
-        const previewBox = document.getElementById('stash-sprite-preview');
-        if (previewBox) {
-            previewBox.style.display = 'none';
-        }
-    }
-
-    function getSpritePreviewDimensions() {
-        const maxWidth = Math.max(180, (window.innerWidth || DEFAULT_PREVIEW_WIDTH) - 24);
-        const width = Math.min(pluginSettings.tooltip_width || DEFAULT_PREVIEW_WIDTH, maxWidth);
-        return {
-            width,
-            height: width * (9 / 16)
-        };
-    }
-
-    function showSpritePreview(previewData, { left, top } = {}) {
-        if (!previewData) {
-            hideSpritePreview();
-            return;
-        }
-
-        const previewBox = getSpritePreviewBox();
-        const previewTimeDisplay = previewBox.querySelector('.preview-time');
-
-        previewBox.style.backgroundImage = previewData.backgroundImage;
-        previewBox.style.backgroundSize = previewData.backgroundSize;
-        previewBox.style.backgroundPosition = previewData.backgroundPosition;
-        previewTimeDisplay.innerText = previewData.timeText;
-        previewBox.style.left = `${left}px`;
-        previewBox.style.top = `${top}px`;
-        previewBox.style.display = 'block';
-    }
-
-    function normalizeGalleryTime(time) {
-        return Number.isFinite(time) ? Math.max(0, time) : 0;
-    }
-
-    function getSpriteInterval(duration, totalSpritesCount) {
-        return totalSpritesCount > 0 && duration > 0 ? duration / totalSpritesCount : 0;
-    }
-
-    function getSpriteSelectionTime(index, totalSpritesCount, duration) {
-        const interval = getSpriteInterval(duration, totalSpritesCount);
-        if (!(interval > 0)) return 0;
-
-        return Math.max(0, Math.min(duration, interval * index));
-    }
-
-    function isSameGalleryTime(a, b) {
-        return a !== null && b !== null && Math.abs(a - b) <= 0.05;
-    }
-
-    function getPlaybackController() {
-        const mediaEl = getPlayer();
-        if (!mediaEl) return null;
-
-        const videoJsContainer = mediaEl.closest('.video-js');
-        const apiCandidates = [
-            mediaEl.player,
-            mediaEl.__videojsPlayer,
-            videoJsContainer?.player,
-            videoJsContainer?.__videojsPlayer
-        ].filter(Boolean);
-
-        const api = apiCandidates.find((candidate) =>
-            typeof candidate.currentTime === 'function' ||
-            typeof candidate.pause === 'function' ||
-            typeof candidate.play === 'function'
-        ) || null;
-
-        const eventTarget = api && (typeof api.addEventListener === 'function' || typeof api.on === 'function')
-            ? api
-            : mediaEl;
-
-        return { mediaEl, api, eventTarget };
-    }
-
-    function getControllerTime(controller) {
-        if (!controller) return 0;
-
-        if (controller.api && typeof controller.api.currentTime === 'function') {
-            const apiTime = controller.api.currentTime();
-            if (Number.isFinite(apiTime)) return apiTime;
-        }
-
-        return normalizeGalleryTime(controller.mediaEl?.currentTime ?? 0);
-    }
-
-    function setControllerTime(controller, time) {
-        if (!controller) return;
-        const previousTime = getControllerTime(controller);
-        const nextTime = normalizeGalleryTime(time);
-        let apiUpdated = false;
-
-        if (controller.api && typeof controller.api.currentTime === 'function') {
-            controller.api.currentTime(nextTime);
-            apiUpdated = true;
-        }
-
-        if (controller.mediaEl) {
-            try {
-                if (!isSameGalleryTime(controller.mediaEl.currentTime, nextTime) || !apiUpdated) {
-                    controller.mediaEl.currentTime = nextTime;
-                }
-            } catch (_) {
-                // Some players reject currentTime updates until metadata is ready.
-            }
-        }
-
-        if (!isSameGalleryTime(getControllerTime(controller), previousTime)) {
-            if (typeof controller.mediaEl?.dispatchEvent === 'function') {
-                try {
-                    controller.mediaEl.dispatchEvent(new Event('timeupdate', { bubbles: true }));
-                } catch (_) {
-                    // Ignore synthetic event failures on non-DOM media shims.
-                }
-            }
-            if (controller.api && typeof controller.api.trigger === 'function') {
-                try {
-                    controller.api.trigger('timeupdate');
-                } catch (_) {
-                    // Ignore trigger failures on non-Video.js players.
-                }
-            }
-        }
-    }
-
-    function playController(controller) {
-        if (!controller) return;
-
-        if (controller.api && typeof controller.api.play === 'function') {
-            controller.api.play();
-            return;
-        }
-
-        if (typeof controller.mediaEl?.play === 'function') {
-            controller.mediaEl.play();
-        }
     }
 
     // --- INJECT CUSTOM STYLES ---
@@ -310,7 +152,7 @@
                 defaultActiveMode = getDefaultActiveMode(settings);
             }
         } catch (e) {
-            console.warn('[SpriteTab] Could not load plugin settings, using defaults', e);
+            console.warn('SpriteTab: Could not load plugin settings, using defaults', e);
         }
         return pluginSettings;
     }
@@ -328,6 +170,9 @@
 
     // --- UI RENDERER ---
     function renderControls(container, updateCallback) {
+        // Hide toolbar if grid_columns is configured in plugin settings
+        if (pluginSettings.grid_columns) return null;
+
         const settings = getSettings();
         const bar = document.createElement('div');
 
@@ -344,24 +189,21 @@
             backdrop-filter: blur(5px);
         `;
 
-        // Slider only when grid_columns is not configured in plugin settings
-        if (!pluginSettings.grid_columns) {
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.min = '1';
-            slider.max = '12';
-            slider.value = 13 - settings.cols;
-            slider.style.cssText = 'cursor: pointer; width: 100%;';
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '1';
+        slider.max = '12';
+        slider.value = 13 - settings.cols;
+        slider.style.cssText = 'cursor: pointer; width: 100%;';
 
-            slider.oninput = (e) => {
-                const newVal = parseInt(e.target.value);
-                const newCols = 13 - newVal;
-                saveSettings({ cols: newCols });
-                updateCallback('cols');
-            };
+        slider.oninput = (e) => {
+            const newVal = parseInt(e.target.value);
+            const newCols = 13 - newVal;
+            saveSettings({ cols: newCols });
+            updateCallback('cols');
+        };
 
-            bar.appendChild(slider);
-        }
+        bar.appendChild(slider);
 
         return bar;
     }
@@ -372,7 +214,18 @@
         const mainContainer = document.createElement('div');
         mainContainer.style.cssText = "width: 100%; display: flex; flex-direction: column;";
 
-        const previewBox = getSpritePreviewBox();
+        // Create or get the preview box
+        let previewBox = document.getElementById('stash-sprite-preview');
+        if (!previewBox) {
+            previewBox = document.createElement('div');
+            previewBox.id = 'stash-sprite-preview';
+            // Add a time display inside the preview
+            const timeDisplay = document.createElement('div');
+            timeDisplay.className = 'preview-time';
+            previewBox.appendChild(timeDisplay);
+            document.body.appendChild(previewBox);
+        }
+        const previewTimeDisplay = previewBox.querySelector('.preview-time');
 
         const scrollArea = document.createElement('div');
         scrollArea.className = 'sprite-scroll-area';
@@ -463,7 +316,6 @@
                 cell.style.backgroundPosition = bgPos;
 
                 const time = (i / totalSpritesCount) * sceneData.duration;
-                const seekTime = getSpriteSelectionTime(i, totalSpritesCount, sceneData.duration);
                 const timeStr = formatTime(time);
 
                 if (pluginSettings.show_timestamps) {
@@ -478,7 +330,15 @@
                 const showTooltip = (clientX, clientY, bgPosOverride, timeStrOverride) => {
                     if (!pluginSettings.tooltip_enabled) return;
 
-                    const { width: tooltipWidth, height: tooltipHeight } = getSpritePreviewDimensions();
+                    previewBox.style.backgroundImage = `url('${sceneData.paths.sprite}')`;
+                    previewBox.style.backgroundSize = `${sourceCols * 100}%`;
+                    previewBox.style.backgroundPosition = bgPosOverride !== undefined ? bgPosOverride : bgPos;
+                    previewTimeDisplay.innerText = timeStrOverride !== undefined ? timeStrOverride : timeStr;
+
+                    // Calculate tooltip dimensions (use fixed aspect ratio since we know it)
+                    const tooltipWidth = pluginSettings.tooltip_width;
+                    const tooltipHeight = tooltipWidth * (9 / 16);
+
                     const vpWidth = window.innerWidth;
                     const vpHeight = window.innerHeight;
                     const offset = 20;
@@ -506,27 +366,19 @@
                         top = edgePadding;
                     }
 
-                    previewBox.style.width = `${tooltipWidth}px`;
-                    showSpritePreview({
-                        backgroundImage: `url('${sceneData.paths.sprite}')`,
-                        backgroundSize: `${sourceCols * 100}%`,
-                        backgroundPosition: bgPosOverride !== undefined ? bgPosOverride : bgPos,
-                        timeText: timeStrOverride !== undefined ? timeStrOverride : timeStr
-                    }, { left, top });
+                    previewBox.style.top = `${top}px`;
+                    previewBox.style.left = `${left}px`;
+                    previewBox.style.display = 'block';
                 };
 
                 const hideTooltip = () => {
-                    hideSpritePreview();
+                    previewBox.style.display = 'none';
                 };
 
                 const seekToTime = () => {
-                    const controller = getPlaybackController();
-                    if (!controller) return;
-                    setControllerTime(controller, seekTime);
-                    playController(controller);
+                    const p = getPlayer();
+                    if (p) { p.currentTime = time; p.play(); }
                 };
-
-                cell.dataset.seekTime = String(seekTime);
 
                 // --- CLICK HANDLER (desktop) ---
                 cell.onclick = (e) => {
@@ -534,7 +386,7 @@
                     if (Date.now() - lastTouchTime < 500) return;
                     const ev = new CustomEvent('spritetab:cellactivate', {
                         bubbles: true, cancelable: true,
-                        detail: { time: seekTime, sceneId: currentSceneId }
+                        detail: { time, sceneId: currentSceneId }
                     });
                     if (!cell.dispatchEvent(ev)) return;
                     seekToTime();
@@ -646,10 +498,11 @@
                         return;
                     }
 
-                    // Short tap without scrolling
+                    // Short tap without scrolling - dispatch activation, then
+                    // (if no listener cancelled it) seek and scroll to the player.
                     const ev = new CustomEvent('spritetab:cellactivate', {
                         bubbles: true, cancelable: true,
-                        detail: { time: seekTime, sceneId: currentSceneId }
+                        detail: { time, sceneId: currentSceneId }
                     });
                     if (cell.dispatchEvent(ev)) {
                         seekToTime();
@@ -692,7 +545,6 @@
     function attachVideoListeners(cells, duration) {
         let currentActiveIndex = -1;
         const total = cells.length;
-        let boundPlayer = null;
 
         const update = () => {
             const player = getPlayer();
@@ -723,19 +575,11 @@
             }
         };
 
-        const bindPlayer = () => {
-            const player = getPlayer();
-            if (!player || player === boundPlayer) return false;
-            player.addEventListener('timeupdate', update);
-            update();
-            boundPlayer = player;
-            return true;
-        };
-
-        if (bindPlayer()) return;
-
         const poller = setInterval(() => {
-            if (bindPlayer()) {
+            const player = getPlayer();
+            if (player) {
+                player.addEventListener('timeupdate', update);
+                update();
                 clearInterval(poller);
             }
         }, 1000);
@@ -910,9 +754,11 @@
                 init(match[1]);
             }
         } else {
-            // Cleanup when leaving scene page
-            currentSceneId = null;
+            // Cleanup popup if leaving scene page
+            const popup = document.getElementById('stash-sprite-preview');
+            if (popup) popup.remove();
             spritesVisible = false;
+            currentSceneId = null;
         }
     });
 
