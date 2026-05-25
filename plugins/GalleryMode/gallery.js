@@ -107,6 +107,9 @@
     // Scene ID of the currently initialised gallery session
     let galleryInitialized = false;
     let spritetabListenerBound = false;
+    let galleryUnloadListenersBound = false;
+    let galleryActivitySaveTimeoutId = null;
+    let galleryActivitySavePendingTime = null;
 
     // Gallery overlay element (shared, reused across sprite clicks)
     let galleryOverlay = null;
@@ -365,7 +368,7 @@
     }
 
     function hasPendingExplicitGalleryTarget() {
-        return isLowBandwidthMode() && galleryPendingExplicitTargetTime !== null;
+        return galleryPendingExplicitTargetTime !== null;
     }
 
     function shouldHoldPendingExplicitGalleryTarget(time) {
@@ -1303,10 +1306,21 @@
         }
 
         if (controller.api && typeof controller.api.trigger === 'function') {
+            // Stash's ScenePlayer ignores timeupdate while paused() is truthy,
+            // so React's `time` state never advances during gallery navigation
+            // and the sprite scrubber snaps back to the last-played time on
+            // the next rerender (e.g. mid-drag). Briefly pretend the player
+            // is playing during the synchronous broadcast so the handler runs
+            // setTime(currentTime).
+            const origPaused = controller.api.paused;
+            const patched = typeof origPaused === 'function';
+            if (patched) controller.api.paused = () => false;
             try {
                 controller.api.trigger('timeupdate');
             } catch (_) {
                 // Ignore trigger failures on non-Video.js players.
+            } finally {
+                if (patched) controller.api.paused = origPaused;
             }
         }
     }
@@ -1345,6 +1359,66 @@
         });
         const json = await response.json();
         return json.data;
+    }
+
+    const GALLERY_ACTIVITY_SAVE_DEBOUNCE_MS = 500;
+    const GALLERY_ACTIVITY_SAVE_MUTATION =
+        'mutation($id: ID!, $t: Float) { sceneSaveActivity(id: $id, resume_time: $t, playDuration: 0) }';
+
+    function scheduleGalleryActivitySave(time) {
+        if (!currentSceneId) return;
+        galleryActivitySavePendingTime = normalizeGalleryTime(time);
+        if (galleryActivitySaveTimeoutId !== null) clearTimeout(galleryActivitySaveTimeoutId);
+        galleryActivitySaveTimeoutId = setTimeout(() => {
+            galleryActivitySaveTimeoutId = null;
+            flushGalleryActivitySave();
+        }, GALLERY_ACTIVITY_SAVE_DEBOUNCE_MS);
+    }
+
+    function flushGalleryActivitySave() {
+        if (galleryActivitySaveTimeoutId !== null) {
+            clearTimeout(galleryActivitySaveTimeoutId);
+            galleryActivitySaveTimeoutId = null;
+        }
+        const time = galleryActivitySavePendingTime;
+        const sceneId = currentSceneId;
+        if (time === null || !sceneId) return;
+        galleryActivitySavePendingTime = null;
+        stashGQL(GALLERY_ACTIVITY_SAVE_MUTATION, { id: sceneId, t: time })
+            .catch((e) => console.warn('GalleryMode: failed to save resume time', e));
+    }
+
+    function flushGalleryActivitySaveBeacon() {
+        if (galleryActivitySaveTimeoutId !== null) {
+            clearTimeout(galleryActivitySaveTimeoutId);
+            galleryActivitySaveTimeoutId = null;
+        }
+        const time = galleryActivitySavePendingTime;
+        const sceneId = currentSceneId;
+        if (time === null || !sceneId) return;
+        galleryActivitySavePendingTime = null;
+        const payload = JSON.stringify({
+            query: GALLERY_ACTIVITY_SAVE_MUTATION,
+            variables: { id: sceneId, t: time }
+        });
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+            try {
+                navigator.sendBeacon('/graphql', new Blob([payload], { type: 'application/json' }));
+                return;
+            } catch (_) {
+                // Fall through to keepalive fetch.
+            }
+        }
+        try {
+            fetch('/graphql', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true
+            });
+        } catch (_) {
+            // Swallow — best-effort on unload.
+        }
     }
 
     async function loadPluginSettings() {
@@ -2573,7 +2647,7 @@
 
     function markGallerySeeking(controller) {
         if (!galleryOverlay || !controller) return;
-        if (!isLowBandwidthMode() && galleryControlledSeekTargetTime !== null) return;
+        if (galleryControlledSeekTargetTime !== null) return;
         const nextTime = getControllerTime(controller);
         if (_SessionEvents) _dispatchStoreEvent(_SessionEvents.controllerSeeking(nextTime));
         if (shouldHoldPendingExplicitGalleryTarget(nextTime)) return;
@@ -2588,11 +2662,11 @@
 
         const nextTime = getControllerTime(controller);
         if (
-            !isLowBandwidthMode()
-            && galleryControlledSeekTargetTime !== null
+            galleryControlledSeekTargetTime !== null
             && isSameGalleryTime(nextTime, galleryControlledSeekTargetTime)
         ) {
             galleryLastObservedPlayerTime = nextTime;
+            galleryControlledSeekTargetTime = null;
             return;
         }
         if (isSameGalleryTime(nextTime, galleryLastObservedPlayerTime)) return;
@@ -2672,16 +2746,17 @@
         if (controller) {
             bindGalleryPlayerEvents(controller);
             pauseController(controller);
-            if (isLowBandwidthMode() && !isSameGalleryTime(getControllerTime(controller), nextTime)) {
+            const currentControllerTime = getControllerTime(controller);
+            if (!isSameGalleryTime(currentControllerTime, nextTime)) {
                 galleryIgnoredPlayerTime = nextTime;
-                galleryPendingExplicitSourceTime = getControllerTime(controller);
+                galleryPendingExplicitSourceTime = currentControllerTime;
                 galleryPendingExplicitTargetTime = nextTime;
+                galleryControlledSeekTargetTime = nextTime;
                 setControllerTime(controller, nextTime);
-            } else if (isLowBandwidthMode()) {
+            } else {
                 galleryIgnoredPlayerTime = null;
                 clearPendingExplicitGalleryTarget(nextTime);
-            } else {
-                clearPendingExplicitGalleryTarget();
+                galleryControlledSeekTargetTime = null;
             }
         }
 
@@ -2854,6 +2929,7 @@
         const controller = getPlaybackController();
         const hadVisibleFrame = galleryHasVisibleFrame;
         galleryLastRequestedTime = nextTime;
+        scheduleGalleryActivitySave(nextTime);
         const preservePrefetch = canReuseGalleryPrefetch(nextTime);
         cancelActiveGalleryRequest();
         if (!preservePrefetch) cancelGalleryPrefetch();
@@ -2948,6 +3024,13 @@
         cancelActiveGalleryRequest();
         cancelGalleryPrefetch();
         closeGallerySocket();
+        flushGalleryActivitySave();
+        const lastTime = galleryLastRequestedTime;
+        const exitController = getPlaybackController();
+        if (exitController && lastTime !== null
+            && !isSameGalleryTime(getControllerTime(exitController), lastTime)) {
+            setControllerTime(exitController, lastTime);
+        }
         galleryLastRequestedTime = null;
         stopGallerySyncLoop();
         galleryIgnoredPlayerTime = null;
@@ -3522,6 +3605,15 @@
             spritetabListenerBound = true;
         }
 
+        // Flush any pending resume_time save when the page is about to unload
+        // so gallery navigation persists even without explicitly closing the
+        // overlay first.
+        if (!galleryUnloadListenersBound) {
+            window.addEventListener('beforeunload', flushGalleryActivitySaveBeacon);
+            window.addEventListener('pagehide', flushGalleryActivitySaveBeacon);
+            galleryUnloadListenersBound = true;
+        }
+
         // Inject toolbar button into the video.js control bar (wait for it to
         // appear), then reconcile with the default_mode setting.
         if (injectGalleryToolbarButton()) {
@@ -3682,6 +3774,9 @@
                 };
                 galleryInitialized = false;
                 spritetabListenerBound = false;
+                galleryUnloadListenersBound = false;
+                galleryActivitySaveTimeoutId = null;
+                galleryActivitySavePendingTime = null;
                 galleryActive = false;
                 defaultMode = 'remember';
                 // Reset session store
