@@ -636,6 +636,88 @@ describe('Auto-scroll layout awareness', () => {
     });
 });
 
+describe('GalleryMode integration handshake', () => {
+    // SpriteTab dispatches `spritetab:cellactivate` (cancelable) before
+    // seeking. The event carries { time, sceneId } in detail. Listeners
+    // (e.g. GalleryMode) can preventDefault to suppress the seek.
+
+    let cell;
+    let mockSeek;
+
+    beforeEach(() => {
+        document.body.innerHTML = '';
+        cell = document.createElement('div');
+        cell.className = 'sprite-cell';
+        document.body.appendChild(cell);
+        mockSeek = jest.fn();
+    });
+
+    const wireClick = (time, sceneId) => {
+        cell.onclick = () => {
+            const ev = new CustomEvent('spritetab:cellactivate', {
+                bubbles: true, cancelable: true,
+                detail: { time, sceneId }
+            });
+            if (!cell.dispatchEvent(ev)) return;
+            mockSeek();
+        };
+    };
+
+    const wireTap = (time, sceneId) => {
+        cell.addEventListener('touchend', () => {
+            const ev = new CustomEvent('spritetab:cellactivate', {
+                bubbles: true, cancelable: true,
+                detail: { time, sceneId }
+            });
+            if (cell.dispatchEvent(ev)) {
+                mockSeek();
+            }
+        });
+    };
+
+    it('dispatches cellactivate with time and sceneId on click', () => {
+        const detail = jest.fn();
+        document.addEventListener('spritetab:cellactivate', (e) => detail(e.detail), { once: true });
+
+        wireClick(42.5, '123');
+        cell.click();
+
+        expect(detail).toHaveBeenCalledWith({ time: 42.5, sceneId: '123' });
+        expect(mockSeek).toHaveBeenCalled();
+    });
+
+    it('seeks on click when no listener cancels the event', () => {
+        wireClick(10, '7');
+        cell.click();
+        expect(mockSeek).toHaveBeenCalled();
+    });
+
+    it('suppresses seek on click when a listener calls preventDefault', () => {
+        document.addEventListener('spritetab:cellactivate', (e) => e.preventDefault(), { once: true });
+        wireClick(10, '7');
+        cell.click();
+        expect(mockSeek).not.toHaveBeenCalled();
+    });
+
+    it('dispatches cellactivate with time and sceneId on short tap', () => {
+        const detail = jest.fn();
+        document.addEventListener('spritetab:cellactivate', (e) => detail(e.detail), { once: true });
+
+        wireTap(99, '456');
+        cell.dispatchEvent(new Event('touchend', { bubbles: true }));
+
+        expect(detail).toHaveBeenCalledWith({ time: 99, sceneId: '456' });
+        expect(mockSeek).toHaveBeenCalled();
+    });
+
+    it('suppresses seek on short tap when a listener calls preventDefault', () => {
+        document.addEventListener('spritetab:cellactivate', (e) => e.preventDefault(), { once: true });
+        wireTap(99, '456');
+        cell.dispatchEvent(new Event('touchend', { bubbles: true }));
+        expect(mockSeek).not.toHaveBeenCalled();
+    });
+});
+
 describe('GraphQL Mock Integration', () => {
     beforeEach(() => {
         global.fetch = jest.fn();

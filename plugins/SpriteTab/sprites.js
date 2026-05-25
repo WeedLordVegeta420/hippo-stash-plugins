@@ -41,6 +41,12 @@
     // Track if sprites panel is currently shown
     let spritesVisible = false;
 
+    // Current scene id, mirrored from init(sceneId). Read by the cell
+    // activation handlers when dispatching `spritetab:cellactivate` so
+    // listeners (e.g. GalleryMode) know which scene the activation is
+    // for. Cleared when navigation leaves a scene page.
+    let currentSceneId = null;
+
     // --- HELPERS ---
     function getPlayer() {
         return document.getElementById("VideoJsPlayer").player;
@@ -378,6 +384,11 @@
                 cell.onclick = (e) => {
                     // Ignore clicks that are synthetic from touch events
                     if (Date.now() - lastTouchTime < 500) return;
+                    const ev = new CustomEvent('spritetab:cellactivate', {
+                        bubbles: true, cancelable: true,
+                        detail: { time, sceneId: currentSceneId }
+                    });
+                    if (!cell.dispatchEvent(ev)) return;
                     seekToTime();
                 };
 
@@ -487,11 +498,18 @@
                         return;
                     }
 
-                    // Short tap without scrolling - seek to time, then scroll to player
-                    seekToTime();
-                    if (pluginSettings.auto_scroll && isMobileLayout()) {
-                        const player = getPlayer();
-                        if (player) player.el_.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Short tap without scrolling - dispatch activation, then
+                    // (if no listener cancelled it) seek and scroll to the player.
+                    const ev = new CustomEvent('spritetab:cellactivate', {
+                        bubbles: true, cancelable: true,
+                        detail: { time, sceneId: currentSceneId }
+                    });
+                    if (cell.dispatchEvent(ev)) {
+                        seekToTime();
+                        if (pluginSettings.auto_scroll && isMobileLayout()) {
+                            const player = getPlayer();
+                            if (player) player.el_.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
                     }
                     touchStartPos = null;
                 };
@@ -579,6 +597,8 @@
             const toolbarGroups = document.querySelectorAll('.scene-toolbar-group');
             if (toolbarGroups.length === 0) return;
             const toolbar = toolbarGroups[toolbarGroups.length - 1];
+
+            currentSceneId = sceneId;
 
             // Load plugin settings first
             await loadPluginSettings();
@@ -738,6 +758,7 @@
             const popup = document.getElementById('stash-sprite-preview');
             if (popup) popup.remove();
             spritesVisible = false;
+            currentSceneId = null;
         }
     });
 
