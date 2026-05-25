@@ -6,10 +6,10 @@ ui:
   javascript:
     - gallery.js
 settings:
-  enabled:
-    displayName: Enabled
-    description: Enable gallery mode (intercepts sprite cell clicks in SpriteTab)
-    type: BOOLEAN
+  default_mode:
+    displayName: Default Mode
+    description: "Gallery mode state on page load: remember (default, restore last state), always_on, always_off"
+    type: STRING
   low_bandwidth_mode:
     displayName: Low Bandwidth Mode
     description: "When enabled, frames are extracted server-side via the frame server (requires the server to be running). When disabled (default), frames are extracted client-side from the video stream at native resolution."

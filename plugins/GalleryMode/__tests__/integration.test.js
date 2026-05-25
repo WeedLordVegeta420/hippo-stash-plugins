@@ -320,7 +320,6 @@ describe('ImageGalleryMode', () => {
             currentSceneId: '123',
             currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } },
             pluginSettings: {
-                enabled: false,
                 frame_server_port: 9876,
                 frame_server_host: '',
                 gallery_prefetch_enabled: false,
@@ -1781,7 +1780,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('mobile tap in gallery mode calls showGalleryFrame instead of seekToTime', () => {
-        gallery._applyState({ pluginSettings: { enabled: true } });
+        gallery._applyState({ galleryActive: true });
         const mockSeek = jest.fn();
         const mockShowGallery = jest.fn();
 
@@ -1801,7 +1800,7 @@ describe('ImageGalleryMode', () => {
 
     it('shows a sprite-sheet preview above the gallery scrubber while scrubbing in mobile gallery mode', async () => {
         setMobileGalleryLayout(true);
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         gallery._applyState({
             currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } }
         });
@@ -1858,7 +1857,7 @@ describe('ImageGalleryMode', () => {
 
     it('shows the native gallery scrubber preview while the gallery is in fullscreen', async () => {
         setMobileGalleryLayout(true);
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         gallery._applyState({
             currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } }
         });
@@ -1915,7 +1914,7 @@ describe('ImageGalleryMode', () => {
 
     it('shows the gallery scrubber preview while fullscreen falls back to pseudo fullscreen', async () => {
         setMobileGalleryLayout(true);
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         fullscreenSpy = jest.fn(() => Promise.reject(new Error('unsupported')));
         gallery._applyState({
             currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } }
@@ -1973,7 +1972,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('shows the gallery scrubber and preview in fullscreen on desktop layouts', async () => {
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         gallery._applyState({
             currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } }
         });
@@ -2025,19 +2024,18 @@ describe('ImageGalleryMode', () => {
         expect(previewBox.style.backgroundPosition).toBe('60% 0%');
     });
 
-    it('gallery checkbox toggle off saves gallery_mode false and calls exitGallery', async () => {
+    it('exitGallery flips isGalleryModeOn back to false and removes the overlay', async () => {
         const { player } = makePlayer();
         const p = gallery.showGalleryAtTime(20);
         lastWebSocket._fireOpen();
         lastWebSocket._fireMessage(new Blob(['jpeg'], { type: 'image/jpeg' }));
         await p;
         expect(document.getElementById('sprite-gallery-overlay')).not.toBeNull();
+        expect(gallery.isGalleryModeOn()).toBe(true);
 
-        const checked = false;
-        saveSettings({ gallery_mode: checked });
-        if (!checked) gallery.exitGallery();
+        gallery.exitGallery();
 
-        expect(getSettings().gallery_mode).toBe(false);
+        expect(gallery.isGalleryModeOn()).toBe(false);
         expect(document.getElementById('sprite-gallery-overlay')).toBeNull();
     });
 
@@ -2200,22 +2198,20 @@ describe('ImageGalleryMode', () => {
         resWrapper.style.display = gallery.isGalleryModeOn() ? 'flex' : 'none';
         expect(resWrapper.style.display).toBe('none');
 
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         resWrapper.style.display = gallery.isGalleryModeOn() ? 'flex' : 'none';
         expect(resWrapper.style.display).toBe('flex');
     });
 
-    it('isGalleryModeOn returns localStorage value when set, overriding pluginSettings', () => {
-        // Without localStorage value, falls back to pluginSettings (enabled: false)
+    it('isGalleryModeOn reflects the in-memory galleryActive flag', () => {
+        // Fresh state: gallery is not active
         expect(gallery.isGalleryModeOn()).toBe(false);
 
-        // With localStorage value = true, overrides pluginSettings
-        saveSettings({ gallery_mode: true });
+        // Flipping galleryActive is the only way to turn isGalleryModeOn on
+        gallery._applyState({ galleryActive: true });
         expect(gallery.isGalleryModeOn()).toBe(true);
 
-        // With localStorage value = false, overrides pluginSettings.enabled=true
-        gallery._applyState({ pluginSettings: { enabled: true } });
-        saveSettings({ gallery_mode: false });
+        gallery._applyState({ galleryActive: false });
         expect(gallery.isGalleryModeOn()).toBe(false);
     });
 
@@ -2378,7 +2374,7 @@ describe('ImageGalleryMode', () => {
         gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
         const resWrapper = document.createElement('span');
 
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         resWrapper.style.display = (gallery.isGalleryModeOn() && gallery.isLowBandwidthMode()) ? 'flex' : 'none';
         expect(resWrapper.style.display).toBe('none');
     });
@@ -2387,7 +2383,7 @@ describe('ImageGalleryMode', () => {
         gallery._applyState({ pluginSettings: { low_bandwidth_mode: true } });
         const resWrapper = document.createElement('span');
 
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         resWrapper.style.display = (gallery.isGalleryModeOn() && gallery.isLowBandwidthMode()) ? 'flex' : 'none';
         expect(resWrapper.style.display).toBe('flex');
     });
@@ -2924,7 +2920,7 @@ describe('ImageGalleryMode', () => {
         await p;
 
         const btn = document.getElementById('gallery-mode-btn');
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         gallery.syncGalleryToolbarButtonState();
         expect(btn.classList.contains('active')).toBe(true);
 
@@ -2934,7 +2930,7 @@ describe('ImageGalleryMode', () => {
 
     it('spritetab:cellactivate opens gallery when gallery mode is on', async () => {
         const { player } = makePlayer();
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
 
         // Bind the listener (normally done in init)
         const handler = (e) => {
@@ -2956,7 +2952,7 @@ describe('ImageGalleryMode', () => {
 
     it('spritetab:cellactivate is ignored when gallery mode is off', () => {
         makePlayer();
-        saveSettings({ gallery_mode: false });
+        gallery._applyState({ galleryActive: false });
 
         const handler = (e) => {
             if (!gallery.isGalleryModeOn()) return;
@@ -2981,10 +2977,123 @@ describe('ImageGalleryMode', () => {
         controlBar.className = 'vjs-control-bar';
         document.body.appendChild(controlBar);
 
-        saveSettings({ gallery_mode: true });
+        gallery._applyState({ galleryActive: true });
         gallery.injectGalleryToolbarButton();
 
         const btn = document.getElementById('gallery-mode-btn');
         expect(btn.classList.contains('active')).toBe(true);
+    });
+
+    describe('default_mode persistence', () => {
+        const GALLERY_STATE_STORAGE_KEY = 'gallery_mode_state';
+
+        beforeEach(() => {
+            window.history.pushState({}, '', '/scenes/123');
+        });
+
+        it('getDefaultMode returns remember for missing or invalid values', () => {
+            expect(gallery.getDefaultMode(undefined)).toBe('remember');
+            expect(gallery.getDefaultMode({})).toBe('remember');
+            expect(gallery.getDefaultMode({ default_mode: 'bogus' })).toBe('remember');
+            expect(gallery.getDefaultMode({ default_mode: 'remember' })).toBe('remember');
+            expect(gallery.getDefaultMode({ default_mode: 'always_on' })).toBe('always_on');
+            expect(gallery.getDefaultMode({ default_mode: 'always_off' })).toBe('always_off');
+        });
+
+        it('applyInitialState with always_on opens the gallery', () => {
+            makePlayer();
+            gallery._applyState({ defaultMode: 'always_on' });
+
+            gallery.applyInitialState();
+
+            expect(gallery.isGalleryModeOn()).toBe(true);
+        });
+
+        it('applyInitialState with always_off keeps the gallery closed and clears saved state', () => {
+            makePlayer();
+            localStorage.setItem(GALLERY_STATE_STORAGE_KEY, 'true');
+            gallery._applyState({ defaultMode: 'always_off' });
+
+            gallery.applyInitialState();
+
+            expect(gallery.isGalleryModeOn()).toBe(false);
+            expect(localStorage.getItem(GALLERY_STATE_STORAGE_KEY)).toBe('false');
+        });
+
+        it('applyInitialState with remember opens the gallery when saved state is true', () => {
+            makePlayer();
+            localStorage.setItem(GALLERY_STATE_STORAGE_KEY, 'true');
+            gallery._applyState({ defaultMode: 'remember' });
+
+            gallery.applyInitialState();
+
+            expect(gallery.isGalleryModeOn()).toBe(true);
+        });
+
+        it('applyInitialState with remember keeps the gallery closed when saved state is false', () => {
+            makePlayer();
+            localStorage.setItem(GALLERY_STATE_STORAGE_KEY, 'false');
+            gallery._applyState({ defaultMode: 'remember' });
+
+            gallery.applyInitialState();
+
+            expect(gallery.isGalleryModeOn()).toBe(false);
+        });
+
+        it('applyInitialState is a no-op on non-scene pages', () => {
+            window.history.pushState({}, '', '/');
+            makePlayer();
+            localStorage.setItem(GALLERY_STATE_STORAGE_KEY, 'true');
+            gallery._applyState({ defaultMode: 'always_on' });
+
+            gallery.applyInitialState();
+
+            expect(gallery.isGalleryModeOn()).toBe(false);
+        });
+
+        it('toggleGalleryMode persists state in remember mode', () => {
+            const { player } = makePlayer();
+            setPlayerReadyState(player, HTMLMediaElement.HAVE_CURRENT_DATA);
+            const controlBar = document.createElement('div');
+            controlBar.className = 'vjs-control-bar';
+            document.body.appendChild(controlBar);
+            gallery.injectGalleryToolbarButton();
+            gallery._applyState({ defaultMode: 'remember' });
+
+            gallery.toggleGalleryMode();
+            expect(localStorage.getItem(GALLERY_STATE_STORAGE_KEY)).toBe('true');
+
+            gallery.toggleGalleryMode();
+            expect(localStorage.getItem(GALLERY_STATE_STORAGE_KEY)).toBe('false');
+        });
+
+        it('toggleGalleryMode does not persist state in always_on mode', () => {
+            const { player } = makePlayer();
+            setPlayerReadyState(player, HTMLMediaElement.HAVE_CURRENT_DATA);
+            const controlBar = document.createElement('div');
+            controlBar.className = 'vjs-control-bar';
+            document.body.appendChild(controlBar);
+            gallery.injectGalleryToolbarButton();
+            gallery._applyState({ defaultMode: 'always_on' });
+
+            gallery.toggleGalleryMode();
+
+            expect(localStorage.getItem(GALLERY_STATE_STORAGE_KEY)).toBeNull();
+        });
+
+        it('exitGallery alone (cleanup path) does not persist state in remember mode', async () => {
+            makePlayer();
+            const p = gallery.showGalleryAtTime(10);
+            lastWebSocket._fireOpen();
+            lastWebSocket._fireMessage(new Blob(['jpeg'], { type: 'image/jpeg' }));
+            await p;
+            gallery._applyState({ defaultMode: 'remember' });
+
+            // localStorage is empty going in; cleanup-style exitGallery should
+            // not write anything to it.
+            gallery.exitGallery();
+
+            expect(localStorage.getItem(GALLERY_STATE_STORAGE_KEY)).toBeNull();
+        });
     });
 });

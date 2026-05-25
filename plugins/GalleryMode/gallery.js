@@ -51,6 +51,8 @@
 
     // --- CONFIGURATION ---
     const STORAGE_KEY = 'stash_plugin_gallery_settings';
+    const GALLERY_STATE_STORAGE_KEY = 'gallery_mode_state';
+    const VALID_DEFAULT_MODES = ['remember', 'always_on', 'always_off'];
     const PLUGIN_ID = 'GalleryMode';
     const DEFAULT_PREVIEW_WIDTH = 300;
     const SEEK_TIMEOUT_MS = 25000;
@@ -90,7 +92,6 @@
 
     // Plugin settings cache
     let pluginSettings = {
-        enabled: false,
         gallery_prefetch_enabled: true,
         gallery_prefetch_offsets_seconds: DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS,
         gallery_prefetch_window_seconds: DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS,
@@ -162,6 +163,15 @@
     // Scene ID of the currently viewed scene (set in init, cleared on navigation)
     let currentSceneId = null;
 
+    // Single in-memory source of truth for whether the gallery overlay is open.
+    // Reset on every page load — gallery mode never persists across navigation.
+    let galleryActive = false;
+
+    // Authoritative copy of the default_mode plugin setting (overwritten by
+    // loadPluginSettings). Governs whether the overlay auto-opens on scene
+    // load and whether user toggles persist to localStorage.
+    let defaultMode = 'remember';
+
     // --- HELPERS ---
     function getSettings() {
         try {
@@ -173,6 +183,33 @@
         const merged = { ...getSettings(), ...newSettings };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
         return merged;
+    }
+
+    function getDefaultMode(pluginConfig) {
+        const mode = pluginConfig?.default_mode;
+        return VALID_DEFAULT_MODES.includes(mode) ? mode : 'remember';
+    }
+
+    function getSavedGalleryState() {
+        try {
+            return localStorage.getItem(GALLERY_STATE_STORAGE_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function setSavedGalleryState(enabled) {
+        try {
+            localStorage.setItem(GALLERY_STATE_STORAGE_KEY, enabled ? 'true' : 'false');
+        } catch (e) {
+            // Storage unavailable
+        }
+    }
+
+    function persistGalleryStateIfRemember() {
+        if (defaultMode === 'remember') {
+            setSavedGalleryState(galleryActive);
+        }
     }
 
     function formatTime(seconds) {
@@ -320,8 +357,7 @@
     }
 
     function isGalleryModeOn() {
-        const local = getSettings().gallery_mode;
-        return (local !== undefined && local !== null) ? local : pluginSettings.enabled;
+        return galleryActive;
     }
 
     function normalizeGalleryTime(time) {
@@ -1318,7 +1354,6 @@
             const allPlugins = data?.configuration?.plugins;
             if (allPlugins && allPlugins[PLUGIN_ID]) {
                 const settings = allPlugins[PLUGIN_ID];
-                pluginSettings.enabled = settings.enabled ?? false;
                 pluginSettings.gallery_prefetch_enabled = settings.gallery_prefetch_enabled ?? true;
                 pluginSettings.gallery_prefetch_offsets_seconds = settings.gallery_prefetch_offsets_seconds
                     ?? DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS;
@@ -1327,6 +1362,7 @@
                 pluginSettings.frame_server_host = settings.frame_server_host ?? '';
                 pluginSettings.low_bandwidth_mode = settings.low_bandwidth_mode ?? false;
                 pluginSettings.show_debug_panel = settings.show_debug_panel ?? false;
+                defaultMode = getDefaultMode(settings);
             }
         } catch (e) {
             console.warn('GalleryMode: Could not load plugin settings, using defaults', e);
@@ -2628,6 +2664,8 @@
 
     // --- CORE ENTRY POINTS ---
     function showGalleryAtTime(time) {
+        galleryActive = true;
+        document.getElementById(GALLERY_BUTTON_ID)?.classList.add('active');
         const controller = getPlaybackController();
         const nextTime = normalizeGalleryTime(time);
 
@@ -2737,6 +2775,7 @@
             closeBtn.onclick = (event) => {
                 event.stopPropagation();
                 exitGallery();
+                persistGalleryStateIfRemember();
             };
             actions.appendChild(closeBtn);
             topRow.appendChild(actions);
@@ -2900,6 +2939,7 @@
     }
 
     function exitGallery() {
+        galleryActive = false;
         if (_SessionEvents) _dispatchStoreEvent(_SessionEvents.exitGallery());
         document.getElementById(GALLERY_BUTTON_ID)?.classList.remove('active');
         if (getGalleryFullscreenElement() || galleryPseudoFullscreen) {
@@ -3383,18 +3423,14 @@
     const GALLERY_BUTTON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><circle cx="8.5" cy="9.5" r="2"/><path d="M21 15l-5-5L5 21"/></svg>';
 
     function toggleGalleryMode() {
-        const wasOn = isGalleryModeOn();
-        saveSettings({ gallery_mode: !wasOn });
-        const btn = document.getElementById(GALLERY_BUTTON_ID);
-        if (wasOn) {
+        if (galleryActive) {
             exitGallery();
-            btn?.classList.remove('active');
         } else {
-            btn?.classList.add('active');
             const controller = getPlaybackController();
             const time = controller ? getControllerTime(controller) : 0;
             showGalleryAtTime(time);
         }
+        persistGalleryStateIfRemember();
     }
 
     function syncGalleryToolbarButtonState() {
@@ -3434,11 +3470,33 @@
         return true;
     }
 
+    // Reconcile the gallery overlay with the authoritative default_mode setting.
+    // Mirrors TheaterMode's applyInitialState: scene-page guard, always_off clears
+    // any stale saved state, remember restores the last user toggle.
+    function applyInitialState() {
+        if (!/\/scenes\/\d+/.test(window.location.pathname)) return;
+        if (defaultMode === 'always_off') {
+            setSavedGalleryState(false);
+            return;
+        }
+        const shouldOpen = defaultMode === 'always_on'
+            || (defaultMode === 'remember' && getSavedGalleryState());
+        if (!shouldOpen) return;
+        const controller = getPlaybackController();
+        const time = controller ? getControllerTime(controller) : 0;
+        showGalleryAtTime(time);
+    }
+
     // --- INITIALIZATION ---
     async function init(sceneId) {
         if (currentSceneId === sceneId && galleryInitialized) return;
 
         if (currentSceneId !== sceneId) {
+            // Reset any leftover overlay from the previous scene so
+            // applyInitialState starts from a clean baseline.
+            if (currentSceneId !== null) {
+                exitGallery();
+            }
             clearGalleryFrameCache();
             cancelGalleryPrefetch();
             closeGallerySocket();
@@ -3464,20 +3522,15 @@
             spritetabListenerBound = true;
         }
 
-        // Inject toolbar button into the video.js control bar (wait for it to appear)
-        const activateIfOn = () => {
-            if (isGalleryModeOn()) {
-                const controller = getPlaybackController();
-                if (controller) showGalleryAtTime(getControllerTime(controller));
-            }
-        };
+        // Inject toolbar button into the video.js control bar (wait for it to
+        // appear), then reconcile with the default_mode setting.
         if (injectGalleryToolbarButton()) {
-            activateIfOn();
+            applyInitialState();
         } else {
             const controlsObserver = new MutationObserver(() => {
                 if (injectGalleryToolbarButton()) {
                     controlsObserver.disconnect();
-                    activateIfOn();
+                    applyInitialState();
                 }
             });
             controlsObserver.observe(document.body, { childList: true, subtree: true });
@@ -3550,7 +3603,8 @@
             scheduleExternalScrubberSync,
             // State queries
             isGalleryModeOn, toggleGalleryMode, injectGalleryToolbarButton,
-            syncGalleryToolbarButtonState,
+            syncGalleryToolbarButtonState, applyInitialState,
+            getDefaultMode, getSavedGalleryState, setSavedGalleryState,
             getGalleryDuration, getGalleryResolutionScale,
             getSpriteSelectionTime, getSpriteIndexAtTime,
             isGalleryPrefetchEnabled, getGalleryPrefetchOffsetsSeconds,
@@ -3618,7 +3672,6 @@
                 currentSceneId = null;
                 currentSceneData = null;
                 pluginSettings = {
-                    enabled: false,
                     gallery_prefetch_enabled: true,
                     gallery_prefetch_offsets_seconds: DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS,
                     gallery_prefetch_window_seconds: DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS,
@@ -3629,6 +3682,8 @@
                 };
                 galleryInitialized = false;
                 spritetabListenerBound = false;
+                galleryActive = false;
+                defaultMode = 'remember';
                 // Reset session store
                 if (_sessionStore) {
                     _sessionStore.destroy();
@@ -3648,6 +3703,8 @@
                 if ('galleryControlsVisible' in delta) galleryControlsVisible = delta.galleryControlsVisible;
                 if ('galleryActiveSocket' in delta) galleryActiveSocket = delta.galleryActiveSocket;
                 if ('galleryHasVisibleFrame' in delta) galleryHasVisibleFrame = delta.galleryHasVisibleFrame;
+                if ('galleryActive' in delta) galleryActive = delta.galleryActive;
+                if ('defaultMode' in delta) defaultMode = delta.defaultMode;
                 // Sync session store from applied state
                 _syncStoreFromGlobals();
             }
