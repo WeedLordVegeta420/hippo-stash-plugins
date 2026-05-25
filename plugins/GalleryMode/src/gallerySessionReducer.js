@@ -564,8 +564,8 @@ function reduce(state, event) {
         const next = cloneState(state);
         const settings = event.pluginSettings;
         next.environment.pluginSettings = { ...next.environment.pluginSettings, ...settings };
-        next.environment.lowBandwidth = settings.low_bandwidth_mode === true;
-        next.environment.debugEnabled = settings.show_debug_panel === true;
+        next.environment.lowBandwidth = settings.lb_enabled === true;
+        next.environment.debugEnabled = settings.general_show_debug_panel === true;
 
         return { state: next, effects: [] };
     }

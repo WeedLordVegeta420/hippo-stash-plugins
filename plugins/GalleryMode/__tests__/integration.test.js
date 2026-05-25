@@ -320,12 +320,12 @@ describe('ImageGalleryMode', () => {
             currentSceneId: '123',
             currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } },
             pluginSettings: {
-                frame_server_port: 9876,
-                frame_server_host: '',
-                gallery_prefetch_enabled: false,
-                gallery_prefetch_offsets_seconds: '5',
-                gallery_prefetch_window_seconds: 30,
-                low_bandwidth_mode: true,
+                lb_frame_server_port: 9876,
+                lb_frame_server_host: '',
+                lb_prefetch_enabled: false,
+                lb_prefetch_offsets_seconds: '5',
+                lb_prefetch_window_seconds: 30,
+                lb_enabled: true,
             }
         });
     });
@@ -983,9 +983,9 @@ describe('ImageGalleryMode', () => {
     it('marks jump buttons as cached when background prefetch fills their target frame', async () => {
         gallery._applyState({
             pluginSettings: {
-                gallery_prefetch_enabled: true,
-                gallery_prefetch_offsets_seconds: '0.5,1,5',
-                gallery_prefetch_window_seconds: 10,
+                lb_prefetch_enabled: true,
+                lb_prefetch_offsets_seconds: '0.5,1,5',
+                lb_prefetch_window_seconds: 10,
             }
         });
         const { player } = makePlayer();
@@ -1042,9 +1042,9 @@ describe('ImageGalleryMode', () => {
     it('prefetches visible forward controls before backward controls and later multiples', async () => {
         gallery._applyState({
             pluginSettings: {
-                gallery_prefetch_enabled: true,
-                gallery_prefetch_offsets_seconds: '0.5,1,5',
-                gallery_prefetch_window_seconds: 30,
+                lb_prefetch_enabled: true,
+                lb_prefetch_offsets_seconds: '0.5,1,5',
+                lb_prefetch_window_seconds: 30,
             }
         });
         const { player } = makePlayer();
@@ -1063,10 +1063,10 @@ describe('ImageGalleryMode', () => {
     it('shows queue and pending request details in the gallery debug panel', async () => {
         gallery._applyState({
             pluginSettings: {
-                gallery_prefetch_enabled: true,
-                gallery_prefetch_offsets_seconds: '1,5',
-                gallery_prefetch_window_seconds: 10,
-                show_debug_panel: true,
+                lb_prefetch_enabled: true,
+                lb_prefetch_offsets_seconds: '1,5',
+                lb_prefetch_window_seconds: 10,
+                general_show_debug_panel: true,
             }
         });
         const { player } = makePlayer();
@@ -1115,9 +1115,9 @@ describe('ImageGalleryMode', () => {
     it('uses a cached jump target immediately without opening another foreground socket', async () => {
         gallery._applyState({
             pluginSettings: {
-                gallery_prefetch_enabled: true,
-                gallery_prefetch_offsets_seconds: '5',
-                gallery_prefetch_window_seconds: 10,
+                lb_prefetch_enabled: true,
+                lb_prefetch_offsets_seconds: '5',
+                lb_prefetch_window_seconds: 10,
             }
         });
         const { player } = makePlayer();
@@ -1142,7 +1142,7 @@ describe('ImageGalleryMode', () => {
         }));
         await new Promise((resolve) => setTimeout(resolve, 10));
 
-        gallery._applyState({ pluginSettings: { gallery_prefetch_enabled: false } });
+        gallery._applyState({ pluginSettings: { lb_prefetch_enabled: false } });
         const socketCountBeforeJump = createdWebSockets.length;
         document.getElementById('sprite-gallery-forward-5').click();
 
@@ -1154,10 +1154,10 @@ describe('ImageGalleryMode', () => {
     it('reprioritizes prefetching around the new image when cached jumps move to a new center', async () => {
         gallery._applyState({
             pluginSettings: {
-                gallery_prefetch_enabled: true,
-                gallery_prefetch_offsets_seconds: '1',
-                gallery_prefetch_window_seconds: 10,
-                show_debug_panel: true,
+                lb_prefetch_enabled: true,
+                lb_prefetch_offsets_seconds: '1',
+                lb_prefetch_window_seconds: 10,
+                general_show_debug_panel: true,
             }
         });
         const { player } = makePlayer();
@@ -2153,7 +2153,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('connects to the configured port when no host override is set', async () => {
-        gallery._applyState({ pluginSettings: { frame_server_port: 12345, frame_server_host: '' } });
+        gallery._applyState({ pluginSettings: { lb_frame_server_port: 12345, lb_frame_server_host: '' } });
         makeVideoJsPlayer();
         const p = gallery.showGalleryFrame(30, '0:30');
         lastWebSocket._fireOpen();
@@ -2163,8 +2163,8 @@ describe('ImageGalleryMode', () => {
         expect(lastWebSocket.url).toContain(':12345');
     });
 
-    it('connects to frame_server_host directly when set, ignoring port', async () => {
-        gallery._applyState({ pluginSettings: { frame_server_host: 'frame.example.com', frame_server_port: 12345 } });
+    it('connects to lb_frame_server_host directly when set, ignoring port', async () => {
+        gallery._applyState({ pluginSettings: { lb_frame_server_host: 'frame.example.com', lb_frame_server_port: 12345 } });
         makeVideoJsPlayer();
         const p = gallery.showGalleryFrame(30, '0:30');
         lastWebSocket._fireOpen();
@@ -2217,24 +2217,24 @@ describe('ImageGalleryMode', () => {
 
     // --- HIGH-BANDWIDTH MODE TESTS ---
 
-    it('isLowBandwidthMode returns true when low_bandwidth_mode is true', () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: true } });
+    it('isLowBandwidthMode returns true when lb_enabled is true', () => {
+        gallery._applyState({ pluginSettings: { lb_enabled: true } });
         expect(gallery.isLowBandwidthMode()).toBe(true);
     });
 
-    it('isLowBandwidthMode returns false when low_bandwidth_mode is false', () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+    it('isLowBandwidthMode returns false when lb_enabled is false', () => {
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         expect(gallery.isLowBandwidthMode()).toBe(false);
     });
 
     it('getEffectiveGalleryScale returns numeric scale in low-bandwidth mode', () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: true } });
+        gallery._applyState({ pluginSettings: { lb_enabled: true } });
         saveSettings({ gallery_resolution: 0.5 });
         expect(gallery.getEffectiveGalleryScale()).toBe(0.5);
     });
 
     it('getEffectiveGalleryScale returns native in high-bandwidth mode', () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         expect(gallery.getEffectiveGalleryScale()).toBe('native');
     });
 
@@ -2293,7 +2293,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode reuses the player video surface without opening a WebSocket', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player, videoContainer } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2314,7 +2314,7 @@ describe('ImageGalleryMode', () => {
 
     it('keeps the high-bandwidth mobile video surface frame-bound until fullscreen is entered', async () => {
         setMobileGalleryLayout(true);
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2342,7 +2342,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode hides full-resolution button and restores player classes on exit', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player, videoContainer } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2371,7 +2371,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('resolution selector is hidden in high-bandwidth mode even when gallery is on', () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const resWrapper = document.createElement('span');
 
         gallery._applyState({ galleryActive: true });
@@ -2380,7 +2380,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('resolution selector shows in low-bandwidth mode when gallery is on', () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: true } });
+        gallery._applyState({ pluginSettings: { lb_enabled: true } });
         const resWrapper = document.createElement('span');
 
         gallery._applyState({ galleryActive: true });
@@ -2389,7 +2389,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('scheduleGalleryPrefetch skips prefetch in high-bandwidth mode', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false, gallery_prefetch_enabled: true } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false, lb_prefetch_enabled: true } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2402,7 +2402,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('gallery navigation works in high-bandwidth mode via shiftGalleryTime', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2429,7 +2429,7 @@ describe('ImageGalleryMode', () => {
     it('high-bandwidth +1s navigation can advance through an entire 1 minute video without hitting a wall', async () => {
         gallery._applyState({
             currentSceneData: { id: '123', duration: 60, paths: { sprite: '/sprite.jpg' } },
-            pluginSettings: { low_bandwidth_mode: false }
+            pluginSettings: { lb_enabled: false }
         });
         const { player } = makePlayer();
         Object.defineProperty(player, 'duration', { value: 60, writable: true, configurable: true });
@@ -2456,7 +2456,7 @@ describe('ImageGalleryMode', () => {
     it('high-bandwidth +1s navigation can cross repeated sprite boundaries in a 1 minute video', async () => {
         gallery._applyState({
             currentSceneData: { id: '123', duration: 60, paths: { sprite: '/sprite.jpg' } },
-            pluginSettings: { low_bandwidth_mode: false }
+            pluginSettings: { lb_enabled: false }
         });
         const { player } = makePlayer();
         Object.defineProperty(player, 'duration', { value: 60, writable: true, configurable: true });
@@ -2497,7 +2497,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth forward jump buttons keep fullscreen enabled and show a corner spinner while seeking', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2534,7 +2534,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode does not cancel its own seek when the player fires seeking events', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, HTMLMediaElement.HAVE_METADATA);
         player.currentTime = 7;
@@ -2559,7 +2559,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode works on first open without prior playback', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         player.paused = true;
         setPlayerReadyState(player, 0);
@@ -2576,7 +2576,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode dispatches timeupdate after a gallery seek completes', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
         const timeupdateSpy = jest.fn();
@@ -2591,7 +2591,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode resolves when the target time already matches the current player time', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         player.currentTime = 18;
         setPlayerReadyState(player, 0);
@@ -2606,7 +2606,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('high-bandwidth mode waits for metadata before resolving the first frame', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
         player.load = jest.fn();
@@ -2628,7 +2628,7 @@ describe('ImageGalleryMode', () => {
 
     it('high-bandwidth mode falls back when requestVideoFrameCallback never fires', async () => {
         jest.useFakeTimers();
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, HTMLMediaElement.HAVE_CURRENT_DATA);
         player.requestVideoFrameCallback = jest.fn(() => 42);
@@ -2647,7 +2647,7 @@ describe('ImageGalleryMode', () => {
 
     it('high-bandwidth mode supports pinch zoom and pan on the video surface', async () => {
         setMobileGalleryLayout(true);
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2684,7 +2684,7 @@ describe('ImageGalleryMode', () => {
     // --- Regression tests ---
 
     it('high-bandwidth forward jump uses frame-accurate seeking, not keyframe-only fastSeek', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2715,7 +2715,7 @@ describe('ImageGalleryMode', () => {
         setMobileGalleryLayout(false);
         Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
 
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2747,7 +2747,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('sprite preview mounts inside the fullscreen element when video container is fullscreen', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player, videoContainer } = makePlayer();
         gallery._applyState({ currentSceneData: { id: '123', duration: 180, paths: { sprite: '/sprite.jpg' } } });
         setPlayerReadyState(player, 0);
@@ -2800,7 +2800,7 @@ describe('ImageGalleryMode', () => {
         setMobileGalleryLayout(true);
         Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
         fullscreenSpy = jest.fn(() => Promise.reject(new Error('unsupported')));
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player, videoContainer } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2827,7 +2827,7 @@ describe('ImageGalleryMode', () => {
     it('exitGalleryFullscreen works even when document.exitFullscreen throws', async () => {
         setMobileGalleryLayout(true);
         fullscreenSpy = jest.fn(() => Promise.reject(new Error('unsupported')));
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, 0);
 
@@ -2880,7 +2880,7 @@ describe('ImageGalleryMode', () => {
     });
 
     it('clicking toolbar button toggles gallery mode on and off', async () => {
-        gallery._applyState({ pluginSettings: { low_bandwidth_mode: false } });
+        gallery._applyState({ pluginSettings: { lb_enabled: false } });
         const { player } = makePlayer();
         setPlayerReadyState(player, HTMLMediaElement.HAVE_CURRENT_DATA);
         player.currentTime = 20;
@@ -2984,7 +2984,7 @@ describe('ImageGalleryMode', () => {
         expect(btn.classList.contains('active')).toBe(true);
     });
 
-    describe('default_mode persistence', () => {
+    describe('Default Mode persistence', () => {
         const GALLERY_STATE_STORAGE_KEY = 'gallery_mode_state';
 
         beforeEach(() => {
@@ -2994,10 +2994,10 @@ describe('ImageGalleryMode', () => {
         it('getDefaultMode returns remember for missing or invalid values', () => {
             expect(gallery.getDefaultMode(undefined)).toBe('remember');
             expect(gallery.getDefaultMode({})).toBe('remember');
-            expect(gallery.getDefaultMode({ default_mode: 'bogus' })).toBe('remember');
-            expect(gallery.getDefaultMode({ default_mode: 'remember' })).toBe('remember');
-            expect(gallery.getDefaultMode({ default_mode: 'always_on' })).toBe('always_on');
-            expect(gallery.getDefaultMode({ default_mode: 'always_off' })).toBe('always_off');
+            expect(gallery.getDefaultMode({ general_default_mode: 'bogus' })).toBe('remember');
+            expect(gallery.getDefaultMode({ general_default_mode: 'remember' })).toBe('remember');
+            expect(gallery.getDefaultMode({ general_default_mode: 'always_on' })).toBe('always_on');
+            expect(gallery.getDefaultMode({ general_default_mode: 'always_off' })).toBe('always_off');
         });
 
         it('applyInitialState with always_on opens the gallery', () => {

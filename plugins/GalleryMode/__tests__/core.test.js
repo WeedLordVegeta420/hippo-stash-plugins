@@ -432,13 +432,13 @@ describe('parseGalleryPluginSettings', () => {
         const data = {
             configuration: {
                 plugins: {
-                    GalleryMode: { enabled: false, frame_server_port: 9999 }
+                    GalleryMode: { enabled: false, lb_frame_server_port: 9999 }
                 }
             }
         };
-        const result = parseGalleryPluginSettings(data, 'GalleryMode', { enabled: true, frame_server_port: 9876 });
+        const result = parseGalleryPluginSettings(data, 'GalleryMode', { enabled: true, lb_frame_server_port: 9876 });
         expect(result.enabled).toBe(false);
-        expect(result.frame_server_port).toBe(9999);
+        expect(result.lb_frame_server_port).toBe(9999);
     });
 
     it('keeps default for missing individual settings', () => {
@@ -449,8 +449,8 @@ describe('parseGalleryPluginSettings', () => {
                 }
             }
         };
-        const result = parseGalleryPluginSettings(data, 'GalleryMode', { enabled: true, frame_server_port: 9876 });
+        const result = parseGalleryPluginSettings(data, 'GalleryMode', { enabled: true, lb_frame_server_port: 9876 });
         expect(result.enabled).toBe(false);
-        expect(result.frame_server_port).toBe(9876);
+        expect(result.lb_frame_server_port).toBe(9876);
     });
 });

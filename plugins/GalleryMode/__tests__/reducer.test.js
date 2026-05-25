@@ -512,13 +512,13 @@ describe('reducer: SETTINGS_LOADED', () => {
     test('updates environment from settings', () => {
         const state = createInitialState();
         const { state: next } = reduce(state, Events.settingsLoaded({
-            low_bandwidth_mode: true,
-            show_debug_panel: true,
-            frame_server_port: 1234
+            lb_enabled: true,
+            general_show_debug_panel: true,
+            lb_frame_server_port: 1234
         }));
         expect(next.environment.lowBandwidth).toBe(true);
         expect(next.environment.debugEnabled).toBe(true);
-        expect(next.environment.pluginSettings.frame_server_port).toBe(1234);
+        expect(next.environment.pluginSettings.lb_frame_server_port).toBe(1234);
     });
 });
 
@@ -631,7 +631,7 @@ describe('gallerySessionStore', () => {
 
     test('dispatch updates state', () => {
         const store = createStore();
-        store.dispatch(Events.settingsLoaded({ low_bandwidth_mode: true }));
+        store.dispatch(Events.settingsLoaded({ lb_enabled: true }));
         expect(store.getState().environment.lowBandwidth).toBe(true);
     });
 
@@ -656,7 +656,7 @@ describe('gallerySessionStore', () => {
 
     test('destroy resets state', () => {
         const store = createStore();
-        store.dispatch(Events.settingsLoaded({ low_bandwidth_mode: true }));
+        store.dispatch(Events.settingsLoaded({ lb_enabled: true }));
         store.destroy();
         expect(store.getState().environment.lowBandwidth).toBe(false);
     });

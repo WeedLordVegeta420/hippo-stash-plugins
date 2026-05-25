@@ -92,13 +92,13 @@
 
     // Plugin settings cache
     let pluginSettings = {
-        gallery_prefetch_enabled: true,
-        gallery_prefetch_offsets_seconds: DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS,
-        gallery_prefetch_window_seconds: DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS,
-        frame_server_port: 9876,
-        frame_server_host: '',
-        low_bandwidth_mode: false,
-        show_debug_panel: false
+        lb_prefetch_enabled: true,
+        lb_prefetch_offsets_seconds: DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS,
+        lb_prefetch_window_seconds: DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS,
+        lb_frame_server_port: 9876,
+        lb_frame_server_host: '',
+        lb_enabled: false,
+        general_show_debug_panel: false
     };
 
     // Store scene data for duration lookups
@@ -170,7 +170,7 @@
     // Reset on every page load — gallery mode never persists across navigation.
     let galleryActive = false;
 
-    // Authoritative copy of the default_mode plugin setting (overwritten by
+    // Authoritative copy of the Default Mode plugin setting (overwritten by
     // loadPluginSettings). Governs whether the overlay auto-opens on scene
     // load and whether user toggles persist to localStorage.
     let defaultMode = 'remember';
@@ -189,7 +189,7 @@
     }
 
     function getDefaultMode(pluginConfig) {
-        const mode = pluginConfig?.default_mode;
+        const mode = pluginConfig?.general_default_mode;
         return VALID_DEFAULT_MODES.includes(mode) ? mode : 'remember';
     }
 
@@ -425,26 +425,24 @@
     }
 
     function getGalleryPrefetchOffsetsSeconds() {
-        return parseGalleryPrefetchOffsets(
-            pluginSettings.gallery_prefetch_offsets_seconds ?? pluginSettings.gallery_prefetch_step_seconds
-        );
+        return parseGalleryPrefetchOffsets(pluginSettings.lb_prefetch_offsets_seconds);
     }
 
     function getGalleryPrefetchWindowSeconds() {
-        const windowSeconds = parseFloat(pluginSettings.gallery_prefetch_window_seconds ?? DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS);
+        const windowSeconds = parseFloat(pluginSettings.lb_prefetch_window_seconds ?? DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS);
         return Number.isFinite(windowSeconds) && windowSeconds > 0 ? windowSeconds : DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS;
     }
 
     function isGalleryPrefetchEnabled() {
-        return pluginSettings.gallery_prefetch_enabled !== false;
+        return pluginSettings.lb_prefetch_enabled !== false;
     }
 
     function isLowBandwidthMode() {
-        return pluginSettings.low_bandwidth_mode === true;
+        return pluginSettings.lb_enabled === true;
     }
 
     function isGalleryDebugPanelEnabled() {
-        return pluginSettings.show_debug_panel === true;
+        return pluginSettings.general_show_debug_panel === true;
     }
 
     function shouldShowGalleryScrubber() {
@@ -1428,14 +1426,14 @@
             const allPlugins = data?.configuration?.plugins;
             if (allPlugins && allPlugins[PLUGIN_ID]) {
                 const settings = allPlugins[PLUGIN_ID];
-                pluginSettings.gallery_prefetch_enabled = settings.gallery_prefetch_enabled ?? true;
-                pluginSettings.gallery_prefetch_offsets_seconds = settings.gallery_prefetch_offsets_seconds
+                pluginSettings.lb_prefetch_enabled = settings.lb_prefetch_enabled ?? true;
+                pluginSettings.lb_prefetch_offsets_seconds = settings.lb_prefetch_offsets_seconds
                     ?? DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS;
-                pluginSettings.gallery_prefetch_window_seconds = settings.gallery_prefetch_window_seconds ?? DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS;
-                pluginSettings.frame_server_port = settings.frame_server_port ?? 9876;
-                pluginSettings.frame_server_host = settings.frame_server_host ?? '';
-                pluginSettings.low_bandwidth_mode = settings.low_bandwidth_mode ?? false;
-                pluginSettings.show_debug_panel = settings.show_debug_panel ?? false;
+                pluginSettings.lb_prefetch_window_seconds = settings.lb_prefetch_window_seconds ?? DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS;
+                pluginSettings.lb_frame_server_port = settings.lb_frame_server_port ?? 9876;
+                pluginSettings.lb_frame_server_host = settings.lb_frame_server_host ?? '';
+                pluginSettings.lb_enabled = settings.lb_enabled ?? false;
+                pluginSettings.general_show_debug_panel = settings.general_show_debug_panel ?? false;
                 defaultMode = getDefaultMode(settings);
             }
         } catch (e) {
@@ -2313,8 +2311,8 @@
     }
 
     function getGallerySocketUrl() {
-        const port = pluginSettings.frame_server_port;
-        const host = pluginSettings.frame_server_host;
+        const port = pluginSettings.lb_frame_server_port;
+        const host = pluginSettings.lb_frame_server_host;
         const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = host || `${location.hostname}:${port}`;
         return `${wsProto}//${wsHost}`;
@@ -3553,7 +3551,7 @@
         return true;
     }
 
-    // Reconcile the gallery overlay with the authoritative default_mode setting.
+    // Reconcile the gallery overlay with the authoritative Default Mode setting.
     // Mirrors TheaterMode's applyInitialState: scene-page guard, always_off clears
     // any stale saved state, remember restores the last user toggle.
     function applyInitialState() {
@@ -3615,7 +3613,7 @@
         }
 
         // Inject toolbar button into the video.js control bar (wait for it to
-        // appear), then reconcile with the default_mode setting.
+        // appear), then reconcile with the Default Mode setting.
         if (injectGalleryToolbarButton()) {
             applyInitialState();
         } else {
@@ -3764,13 +3762,13 @@
                 currentSceneId = null;
                 currentSceneData = null;
                 pluginSettings = {
-                    gallery_prefetch_enabled: true,
-                    gallery_prefetch_offsets_seconds: DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS,
-                    gallery_prefetch_window_seconds: DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS,
-                    frame_server_port: 9876,
-                    frame_server_host: '',
-                    low_bandwidth_mode: false,
-                    show_debug_panel: false
+                    lb_prefetch_enabled: true,
+                    lb_prefetch_offsets_seconds: DEFAULT_GALLERY_PREFETCH_OFFSETS_SECONDS,
+                    lb_prefetch_window_seconds: DEFAULT_GALLERY_PREFETCH_WINDOW_SECONDS,
+                    lb_frame_server_port: 9876,
+                    lb_frame_server_host: '',
+                    lb_enabled: false,
+                    general_show_debug_panel: false
                 };
                 galleryInitialized = false;
                 spritetabListenerBound = false;

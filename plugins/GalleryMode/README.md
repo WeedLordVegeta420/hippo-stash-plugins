@@ -60,14 +60,14 @@ Configure in **Stash → Settings → Plugins → Gallery Mode**.
 
 | Setting | Type | Default | Description |
 |---|---|---|---|
-| Enabled | Boolean | off | Master on/off for gallery mode |
-| Low Bandwidth Mode | Boolean | off | Use the server-side frame extractor instead of capturing frames in the browser (experimental — see above) |
+| Default Mode | String | `remember` | Gallery mode state on page load: `remember` (restore last state), `always_on`, `always_off` |
 | Show Debug Panel | Boolean | off | Show the gallery overlay's internal debug panel |
-| Prefetch Enabled | Boolean | on | Prefetch neighboring frames in the background |
-| Prefetch Offsets | String | — | Comma-separated prefetch offsets in seconds, e.g. `0.5, 1, 5` |
-| Prefetch Window | Number | — | How far ahead/behind the current frame to prefetch (seconds) |
-| Frame Server Port | Number | 9876 | Port the frame server listens on (low bandwidth mode only) |
-| Frame Server Host | String | — | Override hostname for the frame server (low bandwidth mode only). Needed when Stash is behind an HTTPS reverse proxy |
+| Low Bandwidth Mode | Boolean | off | Use the server-side frame extractor instead of capturing frames in the browser (experimental — see above) |
+| Frame Server Host *(Low-bandwidth mode only)* | String | — | Override hostname for the frame server. Needed when Stash is behind an HTTPS reverse proxy |
+| Frame Server Port *(Low-bandwidth mode only)* | Number | 9876 | Port the frame server listens on |
+| Prefetch Enabled *(Low-bandwidth mode only)* | Boolean | on | Prefetch neighboring frames in the background |
+| Prefetch Offsets *(Low-bandwidth mode only)* | String | `5` | Comma-separated prefetch offsets in seconds, e.g. `0.5, 1, 5` |
+| Prefetch Window *(Low-bandwidth mode only)* | Number | 30 | How far ahead/behind the current frame to prefetch (seconds) |
 
 ## Development
 

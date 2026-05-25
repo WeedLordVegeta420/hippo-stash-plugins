@@ -87,13 +87,13 @@ function createInitialState() {
             debugEnabled: false,
             pluginSettings: {
                 enabled: false,
-                gallery_prefetch_enabled: true,
-                gallery_prefetch_offsets_seconds: '5',
-                gallery_prefetch_window_seconds: 30,
-                frame_server_port: 9876,
-                frame_server_host: '',
-                low_bandwidth_mode: false,
-                show_debug_panel: false
+                lb_prefetch_enabled: true,
+                lb_prefetch_offsets_seconds: '5',
+                lb_prefetch_window_seconds: 30,
+                lb_frame_server_port: 9876,
+                lb_frame_server_host: '',
+                lb_enabled: false,
+                general_show_debug_panel: false
             }
         }
     };

@@ -6,38 +6,38 @@ ui:
   javascript:
     - gallery.js
 settings:
-  default_mode:
+  general_default_mode:
     displayName: Default Mode
     description: "Gallery mode state on page load: remember (default, restore last state), always_on, always_off"
     type: STRING
-  low_bandwidth_mode:
-    displayName: Low Bandwidth Mode
-    description: "When enabled, frames are extracted server-side via the frame server (requires the server to be running). When disabled (default), frames are extracted client-side from the video stream at native resolution."
-    type: BOOLEAN
-  show_debug_panel:
+  general_show_debug_panel:
     displayName: Show Debug Panel
     description: Show the GalleryMode debug panel inside the overlay
     type: BOOLEAN
-  gallery_prefetch_enabled:
-    displayName: Prefetch Enabled
-    description: Prefetch neighboring gallery frames in the background
+  lb_enabled:
+    displayName: Low Bandwidth Mode
+    description: "When enabled, frames are extracted server-side via the frame server (requires the server to be running). When disabled (default), frames are extracted client-side from the video stream at native resolution."
     type: BOOLEAN
-  gallery_prefetch_offsets_seconds:
-    displayName: Prefetch Offsets
-    description: "Comma-separated prefetch offsets in seconds, e.g. 0.5, 1, 5"
+  lb_frame_server_host:
+    displayName: Frame Server Host (Low-bandwidth mode only)
+    description: "Hostname (and optional port) for the frame server. Overrides the default of using the current page hostname with Frame Server Port."
     type: STRING
-  gallery_prefetch_window_seconds:
-    displayName: Prefetch Window
-    description: How far ahead/behind the current frame to prefetch (seconds)
+  lb_frame_server_port:
+    displayName: Frame Server Port (Low-bandwidth mode only)
+    description: "Port for the local frame extraction server (default 9876)."
     type: NUMBER
-  frame_server_port:
-    displayName: Frame Server Port
-    description: Port for the local frame extraction server (default 9876)
-    type: NUMBER
-  frame_server_host:
-    displayName: Frame Server Host
-    description: "Hostname (and optional port) for the frame server. Overrides the default of using the current page hostname with frame_server_port."
+  lb_prefetch_enabled:
+    displayName: Prefetch Enabled (Low-bandwidth mode only)
+    description: "Prefetch neighboring gallery frames in the background."
+    type: BOOLEAN
+  lb_prefetch_offsets_seconds:
+    displayName: Prefetch Offsets (Low-bandwidth mode only)
+    description: "Comma-separated prefetch offsets in seconds, e.g. 0.5, 1, 5."
     type: STRING
+  lb_prefetch_window_seconds:
+    displayName: Prefetch Window (Low-bandwidth mode only)
+    description: "How far ahead/behind the current frame to prefetch (seconds)."
+    type: NUMBER
 interface: raw
 exec:
   - python3
